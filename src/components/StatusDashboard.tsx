@@ -5,9 +5,10 @@ import Spinner from 'ink-spinner';
 interface StatusDashboardProps {
     status: string;
     error: string | null;
+    version?: string;
 }
 
-export const StatusDashboard: React.FC<StatusDashboardProps> = ({ status, error }) => {
+export const StatusDashboard: React.FC<StatusDashboardProps> = ({ status, error, version }) => {
     let statusColor = 'yellow';
     let statusText = status.toUpperCase();
 
@@ -34,7 +35,7 @@ export const StatusDashboard: React.FC<StatusDashboardProps> = ({ status, error 
                 </Box>
             )}
             <Box>
-                <Text dimColor>Plan: Take Over The World</Text>
+                <Text dimColor>Plan: Take Over The World {version && `(v${version})`}</Text>
             </Box>
         </Box>
     );

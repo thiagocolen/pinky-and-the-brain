@@ -8,6 +8,8 @@ export const enableDevMode = () => {
     devMode = true;
 };
 
+export const isDebugEnabled = () => devMode;
+
 export const log = (message: string, data?: any) => {
     if (!devMode) return;
     const timestamp = new Date().toISOString();

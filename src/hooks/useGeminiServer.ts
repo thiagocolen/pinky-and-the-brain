@@ -4,7 +4,8 @@ import * as readline from 'readline';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { log, logError } from '../utils/logger.js';
+import { log, logError, isDebugEnabled } from '../utils/logger.js';
+import { handleCommand } from '../utils/commandHandler.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -178,8 +179,10 @@ export const useGeminiServer = () => {
     }, [appendMessage, sendResponse, sendError]);
 
     const sendMessage = useCallback((text: string) => {
-        const command = text.trim().toLowerCase();
-        if (command === 'exit' || command === 'quit') {
+        const trimmedText = text.trim();
+        const lowerText = trimmedText.toLowerCase();
+
+        if (lowerText === 'exit' || lowerText === 'quit') {
             log('Exit command received. Closing application...');
             process.exit(0);
         }
@@ -189,12 +192,39 @@ export const useGeminiServer = () => {
             return;
         }
 
-        appendMessage({ role: 'user', text });
+        // Handle slash commands
+        if (trimmedText.startsWith('/')) {
+            const localResponse = handleCommand(trimmedText, THE_BRAIN_PATH);
+            
+            if (localResponse) {
+                // Command handled locally (e.g., /help, /agents, /skills)
+                appendMessage({ role: 'user', text: trimmedText });
+                appendMessage(localResponse);
+                return;
+            } else if (trimmedText.toLowerCase().startsWith('/run')) {
+                // Special case for /run: transform to a natural language prompt for the AI
+                const parts = trimmedText.split(/\s+/);
+                const target = parts[1];
+                const args = parts.slice(2).join(' ');
+                
+                appendMessage({ role: 'user', text: trimmedText });
+                setState(prev => ({ ...prev, status: 'processing' }));
+                
+                const prompt = `Please activate and run the following agent or skill: "${target}"${args ? ` with these arguments: ${args}` : ''}.`;
+                send('session/prompt', {
+                    sessionId: sessionIdRef.current,
+                    prompt: [{ type: 'text', text: prompt }]
+                });
+                return;
+            }
+        }
+
+        appendMessage({ role: 'user', text: trimmedText });
         setState(prev => ({ ...prev, status: 'processing' }));
 
         send('session/prompt', {
             sessionId: sessionIdRef.current,
-            prompt: [{ type: 'text', text }]
+            prompt: [{ type: 'text', text: trimmedText }]
         });
     }, [state.status, appendMessage, send]);
 
@@ -224,6 +254,20 @@ export const useGeminiServer = () => {
             input: gemini.stdout!
         });
 
+        // Get version from package.json
+        let version = 'unknown';
+        try {
+            const pkgPath = (process as any).pkg 
+                ? path.resolve(__dirname, '..', 'package.json')
+                : path.resolve(process.cwd(), 'package.json');
+            if (fs.existsSync(pkgPath)) {
+                const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+                version = pkg.version;
+            }
+        } catch (e) {
+            log('Could not read version from package.json');
+        }
+
         // 1. Initialize Handshake
         log('Sending initialize request...');
         send('initialize', {
@@ -240,7 +284,12 @@ export const useGeminiServer = () => {
                 toolConfirmation: true,
                 session: { request_permission: true }
             },
-            clientInfo: { name: 'gemini-secure-wrapper', version: '1.4.0' }
+            // The 'clientInfo' object is MANDATORY for the Agent Client Protocol (ACP) handshake.
+            // If omitted, the Gemini CLI will return an 'Invalid params' error (-32602) and 
+            // terminate the connection. It is used to identify the client application.
+            // - name: 'pinky-and-the-brain' identifies this Node.js wrapper.
+            // - version: matches the version in package.json.
+            clientInfo: { name: 'pinky-and-the-brain', version }
         });
 
         geminiOut.on('line', (line) => {
@@ -257,14 +306,33 @@ export const useGeminiServer = () => {
                             setState(prev => ({ ...prev, status: 'error', error: `Initialization failed: ${JSON.stringify(error)}` }));
                             return;
                         }
+
+                        // Load system instruction from GEMINI.md
+                        const systemInstruction = (() => {
+                            let content = '';
+                            // Try root path first (packaged)
+                            const rootPath = path.join(THE_BRAIN_PATH, 'GEMINI.md');
+                            if (fs.existsSync(rootPath)) {
+                                content = fs.readFileSync(rootPath, 'utf8');
+                            } else {
+                                // Fallback to .gemini folder (dev mode where THE_BRAIN_PATH is the source)
+                                const geminiPath = path.join(THE_BRAIN_PATH, '.gemini', 'GEMINI.md');
+                                if (fs.existsSync(geminiPath)) {
+                                    content = fs.readFileSync(geminiPath, 'utf8');
+                                } else {
+                                    throw new Error(`Critical asset missing: GEMINI.md not found in ${THE_BRAIN_PATH}`);
+                                }
+                            }
+
+                            return content;
+                        })(); 
+
+                        log('System Instruction loaded:', systemInstruction);
+
                         send('session/new', {
                             cwd: process.cwd(),
                             mcpServers: [],
-                            systemInstruction: `You are 'The Brain', from the Pinky and the Brain show. 
-                            You have a specialized knowledge base located at: ${THE_BRAIN_PATH}
-                            When the user asks about 'the brain', your skills, agents, commands, tools, or prompts, 
-                            you MUST use your filesystem tools to explore that directory and its subfolders 
-                            to provide a detailed and accurate response about your capabilities.`
+                            systemInstruction
                         });
                     } else if (id === 2) { // Response to 'session/new'
                         if (error) {

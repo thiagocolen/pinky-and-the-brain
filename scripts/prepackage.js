@@ -4,10 +4,25 @@ import path from 'path';
 const src = process.env.PATBATPP_SRC_FOLDER;
 if (src && fs.existsSync(src)) {
   console.log(`Copying knowledge from: ${src}`);
+
+  // Ensure GEMINI.md exists (check in src or src/.gemini)
+  let geminiPath = path.join(src, 'GEMINI.md');
+  if (!fs.existsSync(geminiPath)) {
+    geminiPath = path.join(src, '.gemini', 'GEMINI.md');
+  }
+
+  if (!fs.existsSync(geminiPath)) {
+    console.error(`ERROR: Critical asset missing! Could not find GEMINI.md in ${src} or ${path.join(src, '.gemini')}`);
+    process.exit(1);
+  }
   
   if (!fs.existsSync('the-brain')) {
     fs.mkdirSync('the-brain', { recursive: true });
   }
+
+  // Copy GEMINI.md to the-brain root
+  fs.copyFileSync(geminiPath, path.join('the-brain', 'GEMINI.md'));
+  console.log(`  [COPY] GEMINI.md (System Instruction)`);
 
   const copyRecursive = (source, target) => {
     const files = fs.readdirSync(source);

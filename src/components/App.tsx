@@ -7,6 +7,13 @@ import { ChatInput } from './ChatInput.js';
 import { BrainAnimation } from './BrainAnimation.js';
 import { FooterStatus } from './FooterStatus.js';
 
+import { fileURLToPath } from 'url';
+import path from 'path';
+import fs from 'fs';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 interface AppProps {
     initialCommand?: string;
 }
@@ -16,9 +23,13 @@ export const App: React.FC<AppProps> = ({ initialCommand }) => {
     const hasSentInitialCommand = React.useRef(false);
 
     React.useEffect(() => {
-        if (initialCommand && status === 'ready' && !hasSentInitialCommand.current) {
+        if (status === 'ready' && !hasSentInitialCommand.current) {
             hasSentInitialCommand.current = true;
-            sendMessage(initialCommand);
+            if (initialCommand) {
+                sendMessage(initialCommand);
+            } else {
+                sendMessage("/help");
+            }
         }
     }, [initialCommand, status, sendMessage]);
 
@@ -43,11 +54,26 @@ export const App: React.FC<AppProps> = ({ initialCommand }) => {
     const sandbox = 'no sandbox';
     const model = 'Auto (The Brain 1.0-mini)';
 
+    const version = React.useMemo(() => {
+        try {
+            const pkgPath = (process as any).pkg 
+                ? path.resolve(__dirname, '..', 'package.json')
+                : path.resolve(process.cwd(), 'package.json');
+            if (fs.existsSync(pkgPath)) {
+                const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+                return pkg.version;
+            }
+        } catch (e) {
+            // silent fail
+        }
+        return '0.0.0';
+    }, []);
+
     return (
         <Box flexDirection="column" minHeight={rows}>
             {/* Header */}
             <Box paddingX={1} marginBottom={1}>
-                <StatusDashboard status={status} error={error} />
+                <StatusDashboard status={status} error={error} version={version} />
             </Box>
 
             {/* Chat History / Content area */}

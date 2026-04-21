@@ -5,6 +5,11 @@ import { Command } from 'commander';
 import { App } from './components/App.js';
 import { log, logError, enableDevMode } from './utils/logger.js';
 import * as fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Global error handlers
 process.on('uncaughtException', (err) => {
@@ -21,10 +26,24 @@ process.on('unhandledRejection', (reason) => {
 
 const program = new Command();
 
+// Get version from package.json
+let version = '0.0.0';
+try {
+  const pkgPath = (process as any).pkg 
+    ? path.resolve(__dirname, '..', 'package.json')
+    : path.resolve(process.cwd(), 'package.json');
+  if (fs.existsSync(pkgPath)) {
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    version = pkg.version;
+  }
+} catch (e) {
+  // silent fail
+}
+
 program
   .name('pinky-and-the-brain')
   .description('A crazy little piece of software that works with your gemini-cli')
-  .version('1.4.0')
+  .version(version)
   .option('-c, --command <command>', 'Execute a command and exit')
   .option('-d, --development-mode', 'Enable development logging');
 

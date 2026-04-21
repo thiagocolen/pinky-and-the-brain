@@ -7,6 +7,7 @@
   "bin": "dist/index.mjs",
   "scripts": {
     "dev": "tsx watch src/index.ts --development-mode",
+    "clean": "node scripts/clean.js",
     "build": "node scripts/build.js",
     "start": "node dist/index.mjs",
     "prepackage": "node scripts/prepackage.js",
