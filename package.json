@@ -1,0 +1,53 @@
+{
+  "name": "pinky-and-the-brain",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "",
+  "main": "dist/index.mjs",
+  "bin": "dist/index.mjs",
+  "scripts": {
+    "dev": "tsx watch src/index.ts --development-mode",
+    "build": "node scripts/build.js",
+    "start": "node dist/index.mjs",
+    "prepackage": "node scripts/prepackage.js",
+    "package": "npm run build && node scripts/log-assets.js && npx @yao-pkg/pkg . --output bin/brain",
+    "postpackage": "node scripts/postpackage.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "pkg": {
+    "assets": [
+      "package.json",
+      "the-brain/**/*"
+    ],
+    "targets": [
+      "node20-win-x64",
+      "node20-macos-x64",
+      "node20-linux-x64"
+    ],
+    "outputPath": "bin"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "chalk": "^5.6.2",
+    "cli-spinners": "^3.4.0",
+    "commander": "^14.0.3",
+    "esbuild": "^0.28.0",
+    "ink": "^7.0.1",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
+    "pkg": "^5.8.1",
+    "react": "^19.2.5",
+    "yoga-layout": "^3.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.2.14",
+    "cross-env": "^10.1.0",
+    "react-devtools-core": "^7.0.1",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  }
+}
