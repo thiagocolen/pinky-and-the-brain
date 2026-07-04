@@ -9,10 +9,10 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "../");
 
 // 1. Load from the current working directory .env if present
-dotenv.config();
+dotenv.config({ override: true });
 
 // 2. Load from the project root .env as a fallback
-dotenv.config({ path: path.join(rootDir, ".env") });
+dotenv.config({ path: path.join(rootDir, ".env"), override: true });
 
 // Disable LangSmith tracing by default
 const defaultProject = "pinky-and-the-brain-agents";
@@ -103,7 +103,7 @@ export function validateConfig() {
 
 
   if (!process.env.SLACK_BOT_TOKEN) {
-    throw new Error("Missing critical environment variable: SLACK_BOT_TOKEN is required for Slack integration");
+    logger.info("SLACK_BOT_TOKEN is not set. Slack integration is disabled.");
   }
 
   if (config.langchainTracingV2) {

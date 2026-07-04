@@ -236,3 +236,60 @@ resource "aws_ecs_express_gateway_service" "agent_service" {
     aws_iam_role_policy_attachment.ecs_infrastructure
   ]
 }
+
+# CloudFront Distribution pointing to the ECS Express Gateway Service
+resource "aws_cloudfront_distribution" "agent_cdn" {
+  origin {
+    domain_name = replace(
+      try(aws_ecs_express_gateway_service.agent_service.ingress_paths[0].endpoint, ""),
+      "/^https?://|/.*$/", ""
+    )
+    origin_id   = "ECSExpressGatewayOrigin"
+
+    custom_origin_config {
+      http_port                = 80
+      https_port               = 443
+      origin_protocol_policy   = "https-only"
+      origin_ssl_protocols     = ["TLSv1.2"]
+    }
+  }
+
+  enabled             = true
+  is_ipv6_enabled     = true
+  comment             = "CDN for Pinky and the Brain Agent Service"
+
+  default_cache_behavior {
+    allowed_methods  = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "ECSExpressGatewayOrigin"
+
+    forwarded_values {
+      query_string = true
+      headers      = ["Accept", "Accept-Encoding", "Accept-Language", "Authorization", "Content-Type", "Origin", "X-API-Key"]
+
+      cookies {
+        forward = "all"
+      }
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 0
+    max_ttl                = 0
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    cloudfront_default_certificate = true
+  }
+
+  tags = {
+    Project     = var.project_name
+    Environment = var.environment
+  }
+}
