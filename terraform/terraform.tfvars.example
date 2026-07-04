@@ -1,0 +1,11 @@
+# Region and Environment configurations
+aws_region   = "us-east-1"
+project_name = "pinky-and-the-brain-agents"
+environment  = "dev"
+
+# API Keys & Tracing Configuration
+langchain_tracing_v2 = "true"
+langchain_project    = "pinky-and-the-brain-agents"
+
+# Enter your LangSmith API key here (DO NOT commit the actual file with this filled in)
+# langchain_api_key    = "lsv2_pt_YOUR_API_KEY_HERE"

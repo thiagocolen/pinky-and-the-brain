@@ -1,54 +1,56 @@
 {
   "name": "pinky-and-the-brain",
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "description": "Serverless multi-agent ACP service on AWS orchestrated via LangGraph.js",
   "type": "module",
-  "description": "",
-  "main": "dist/index.mjs",
-  "bin": "dist/index.mjs",
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./sdk": "./dist/graph-sdk.js"
+  },
   "scripts": {
-    "dev": "tsx watch src/index.ts --development-mode",
-    "clean": "node scripts/clean.js",
-    "build": "node scripts/build.js",
-    "start": "node dist/index.mjs",
-    "prepackage": "node scripts/prepackage.js",
-    "package": "npm run build && node scripts/log-assets.js && npx @yao-pkg/pkg . --output bin/brain",
-    "postpackage": "node scripts/postpackage.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc",
+    "watch": "tsc -w",
+    "lint": "eslint 'src/**/*.ts'",
+    "test:unit": "vitest run src/tests/unit",
+    "test:integration": "vitest run src/tests/integration",
+    "ingest": "node dist/scripts/ingest.js",
+    "ingest:remote": "node dist/scripts/ingest.js --remote",
+    "start": "node dist/index.js",
+    "cli": "node dist/cli.js",
+    "server": "node dist/server.js",
+    "mcp": "node dist/mcp.js",
+    "deploy": "node scripts/deploy.js",
+    "report-infra": "powershell -ExecutionPolicy Bypass -File scripts/report-infra.ps1",
+    "tail-logs": "node scripts/tail-logs.js",
+    "tail-logs:local": "node scripts/tail-logs.js",
+    "test-tracing": "node scripts/test-tracing.js",
+    "ls-studio": "npx @langchain/langgraph-cli dev",
+    "bridge": "node scripts/archive/acp-remote-bridge.js",
+    "bridge:debug": "node --inspect scripts/archive/acp-remote-bridge.js"
   },
-  "pkg": {
-    "assets": [
-      "package.json",
-      "the-brain/**/*"
-    ],
-    "targets": [
-      "node20-win-x64",
-      "node20-macos-x64",
-      "node20-linux-x64"
-    ],
-    "outputPath": "bin"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.500.0",
+    "@langchain/core": "^1.2.1",
+    "@langchain/google-genai": "^2.2.0",
+    "@langchain/langgraph": "^1.4.7",
+    "@langchain/openai": "^1.5.3",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "chalk": "^5.6.2",
-    "cli-spinners": "^3.4.0",
-    "commander": "^14.0.3",
-    "esbuild": "^0.28.0",
-    "ink": "^7.0.1",
-    "ink-spinner": "^5.0.0",
-    "ink-text-input": "^6.0.0",
-    "pkg": "^5.8.1",
-    "react": "^19.2.5",
-    "yoga-layout": "^3.2.1"
+    "@types/express": "^5.0.6",
+    "@types/sqlite3": "^3.1.11",
+    "axios": "^1.6.8",
+    "dotenv": "^16.4.5",
+    "express": "^5.2.1",
+    "sqlite3": "^6.0.1",
+    "zod": "^3.22.4"
   },
   "devDependencies": {
-    "@types/node": "^25.6.0",
-    "@types/react": "^19.2.14",
-    "cross-env": "^10.1.0",
-    "react-devtools-core": "^7.0.1",
-    "tsx": "^4.21.0",
-    "typescript": "^6.0.2"
+    "@types/node": "^20.11.0",
+    "@typescript-eslint/eslint-plugin": "^6.19.0",
+    "@typescript-eslint/parser": "^6.19.0",
+    "concurrently": "^10.0.3",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.2.1"
   }
 }

@@ -1,6 +1,49 @@
-bin
-dist
-node_modules
-the-brain
+# Nodejs build
+dist/
+infra-reports/
+node_modules/
+
+# Logs
 *.log
+
+# Environment variables
+.env
+.env.*
+
+# Database / cache
+*.db
+*.db-shm
+*.db-wal
+src/storage/vector-store.json
+
+#
+
+# LangGraph API
+.langgraph_api
+
+# Editor / IDE settings
+.zed/
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS system files
 .DS_Store
+Thumbs.db
+
+# Terraform local state and files
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfstate.lock.info
+*.tfvars
+*.tfvars.json
+.terraform.lock.hcl
+
+# Local developer overrides
+terraform.tfvars
+*.auto.tfvars
