@@ -1,6 +1,0 @@
-bin
-dist
-node_modules
-the-brain
-*.log
-.DS_Store
