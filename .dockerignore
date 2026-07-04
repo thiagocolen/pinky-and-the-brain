@@ -1,0 +1,15 @@
+node_modules
+dist
+.env
+*.db
+*.db-shm
+*.db-wal
+*.log
+.git
+.zed
+terraform
+.terraform
+Dockerfile
+.dockerignore
+README.md
+docs

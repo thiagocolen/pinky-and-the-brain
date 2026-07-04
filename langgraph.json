@@ -1,0 +1,8 @@
+{
+  "node_version": "20",
+  "dependencies": ["."],
+  "graphs": {
+    "supervisor": "./src/agents/graph.ts:graph"
+  },
+  "env": ".env"
+}
