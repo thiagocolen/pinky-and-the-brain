@@ -1,0 +1,58 @@
+---
+sidebar_position: 4
+---
+
+# ACP Protocol
+
+The raw ACP server (`src/index.ts` + `src/protocol/acp-server.ts`) implements a subset
+of JSON-RPC 2.0 methods over stdin/stdout. All requests and params are validated with
+Zod schemas from `src/protocol/messages.ts`.
+
+## Methods
+
+| Method | Description | Params schema |
+| --- | --- | --- |
+| `initialize` | Handshake; marks the server as initialized and returns `protocolVersion`, `serverInfo`, `capabilities`. | `InitializeParamsSchema` |
+| `session/new` | Creates a new session (`sessionId`) scoped to a working directory (`cwd`). | `SessionNewParamsSchema` |
+| `session/prompt` | Runs the agent workflow for an existing session, streaming `session/update` notifications and returning `{stopReason: "end_turn"}`. | `SessionPromptParamsSchema` |
+| `agents/list` | Lists the available named agents (`the-brain`, `supervisor`). | none |
+| `agents/run` | Runs the agent workflow directly by `agentName` + `prompt` + `threadId`, streaming `agents/progress` notifications. | `RunAgentParamsSchema` |
+
+Any other method returns a `-32601` ("Method not found") JSON-RPC error.
+
+## Session lifecycle
+
+1. Client sends `initialize`. The server records `isInitialized = true`.
+2. Client sends `session/new` with a `cwd`. The server generates and returns a
+   `sessionId`, storing it in an in-memory `Map`.
+3. Client sends one or more `session/prompt` requests with that `sessionId`. Each
+   prompt is run through `runGraphWorkflow("the-brain", promptText, sessionId,
+   ...)` - the thread ID for LangGraph checkpointing is the session ID itself, so
+   conversation state persists across prompts within a session.
+4. During execution, the server writes `session/update` notifications
+   (`sessionUpdate: "agent_message_chunk"`) to `stdout` for both progress and the final
+   response text, then replies to the original request with
+   `{stopReason: "end_turn"}`.
+
+`session/prompt` accepts either a plain string `prompt` or an array of
+`{type: "text", text: string}` content blocks (only `text` blocks are concatenated;
+other block types are ignored).
+
+## Error codes
+
+| Code | Meaning |
+| --- | --- |
+| `-32700` | Parse error / invalid JSON-RPC request. |
+| `-32601` | Method not found. |
+| `-32602` | Invalid params (schema validation failure). |
+| `-32002` | Server not initialized (a session/run method was called before `initialize`). |
+| `-32603` | Internal execution error while running the graph workflow. |
+
+## Compatibility notes
+
+- `agents/list` and `agents/run` predate the `session/*` methods and are kept for
+  backward compatibility; `session/new` + `session/prompt` is the primary flow used by
+  Zed-style clients.
+- `handleListAgents` currently advertises only `the-brain` and `supervisor` (an alias
+  for the same node), even though `RunAgentParamsSchema` accepts a broader enum of
+  agent names for compatibility with older clients.

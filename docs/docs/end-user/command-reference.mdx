@@ -1,0 +1,37 @@
+---
+sidebar_position: 7
+---
+
+# Command Reference
+
+## npm scripts
+
+| Script | Command | Description |
+| --- | --- | --- |
+| `npm run build` | `tsc` | Compile TypeScript to `dist/`. |
+| `npm run watch` | `tsc -w` | Compile in watch mode. |
+| `npm run lint` | `eslint 'src/**/*.ts'` | Lint the source tree. |
+| `npm run test:unit` | `vitest run src/tests/unit` | Run unit tests. |
+| `npm run test:integration` | `vitest run src/tests/integration` | Run integration tests. |
+| `npm run start` | `node dist/index.js` | Raw ACP stdin/stdout server. |
+| `npm run cli` | `node dist/cli.js` | Interactive REPL CLI. |
+| `npm run server` | `node dist/server.js` | Express REST/SSE server. |
+| `npm run mcp` | `node dist/mcp.js` | Stdio MCP server. |
+| `npm run ingest` | `node dist/scripts/ingest.js` | Rebuild the local vector store. |
+| `npm run ingest:remote` | `node dist/scripts/ingest.js --remote` | Rebuild the vector store from a remote source. |
+| `npm run deploy` | `node scripts/deploy.js` | Docker build, ECR push, and Terraform deploy. |
+| `npm run report-infra` | `scripts/report-infra.ps1` | PowerShell AWS infrastructure status audit. |
+| `npm run tail-logs` | `node scripts/tail-logs.js` | Stream cloud container logs. |
+| `npm run test-tracing` | `node scripts/test-tracing.js` | Verify LangSmith tracing connectivity. |
+| `npm run ls-studio` | `npx @langchain/langgraph-cli dev` | Run LangGraph Studio locally against `langgraph.json`. |
+| `npm run docs:install` | `npm install --prefix docs` | Install documentation site dependencies. |
+| `npm run docs:start` | `npm run start --prefix docs` | Run the documentation site locally. |
+| `npm run docs:build` | `npm run build --prefix docs` | Build the static documentation site. |
+
+## REST API endpoints
+
+See the full reference in [Server Usage](/docs/end-user/server-usage#endpoint-reference).
+
+## ACP JSON-RPC methods
+
+See the full reference in [ACP Protocol](/docs/developer/acp-protocol).

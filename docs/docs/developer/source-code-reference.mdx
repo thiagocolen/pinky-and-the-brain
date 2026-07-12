@@ -1,0 +1,124 @@
+---
+sidebar_position: 3
+---
+
+# Source Code Reference
+
+## Entrypoints
+
+### `src/index.ts`
+
+Validates configuration, then wires a `readline` interface reading one JSON-RPC line at
+a time from `stdin` into `AcpServer.handleInput()`, writing the response line to
+`stdout`. This is the raw ACP stdin/stdout server (`npm run start`).
+
+### `src/cli.ts`
+
+Standalone interactive REPL. Generates a `cli-session-<random>` thread ID, then loops:
+prompt the user, call `runGraphWorkflow("supervisor", input, threadId, progressCallback)`,
+print the response, repeat until `exit`/`quit`. Progress callbacks are written to
+`stderr`.
+
+### `src/server.ts`
+
+Express app (`npm run server`). See the endpoint table in
+[Server Usage](/docs/end-user/server-usage#endpoint-reference). Internally uses an
+`EventEmitter` (`runEvents`) to fan out per-run `progress`/`complete` events to any
+connected SSE clients, and an in-memory `Map` (`activeRuns`) to track run status for
+clients that connect to the stream after a run has already completed.
+
+### `src/mcp.ts`
+
+MCP server (`npm run mcp`) built on `@modelcontextprotocol/sdk`. Registers a single
+`run_agent` tool (see [MCP Usage](/docs/end-user/mcp-usage)) and serves it over
+`StdioServerTransport`.
+
+### `src/graph-sdk.ts`
+
+Re-exports `graph`, `runGraphWorkflow`, `SQLiteCheckpointer`, and the
+`AgentWorkspaceState` type for consumption as a library (`pinky-and-the-brain/sdk`
+export) by other Node.js projects that want to embed the graph engine directly.
+
+## Agents (`src/agents/`)
+
+### `types.ts`
+
+Defines `AgentWorkspaceState`, the shared LangGraph state shape (see
+[Architecture](/docs/developer/architecture#shared-state-agentworkspacestate)).
+
+### `graph.ts`
+
+Declares the `StateAnnotation` (LangGraph's typed state/reducers), compiles the
+`StateGraph` with all five nodes and their conditional edges, exports the compiled
+`graph` and `checkpointer` singletons, and exposes `runGraphWorkflow()` - the single
+function called by every entrypoint to execute the graph for a given `agentName`,
+`prompt`, and `threadId`, streaming `progressCallback` updates as the graph executes.
+
+### `the-brain.ts`
+
+Exports `detectArea(text)` (pure keyword-based domain detection) and `theBrainNode()`
+(the supervisor graph node). Loads persona reference documents (`XXX-GEMINI.md`,
+`PATBATPP-Dialogues-Source.md`) from a `docs/` directory via `getResource()`, which
+searches several candidate paths relative to the compiled file location so it works
+both in `src/` (ts-node/dev) and `dist/` (compiled) layouts.
+
+### `specialists.ts`
+
+Exports `retrieveContext(query, area)` (keyword-overlap scoring against the vector
+store), the shared `runSpecialistNode(state, area)` implementation, and the four
+graph node wrappers (`awsTutorNode`, `cellularAutomataNode`,
+`englishCertificationInstructorNode`, `jobTechnicalInterviewerNode`).
+
+## Protocol (`src/protocol/`)
+
+### `acp-server.ts`
+
+`AcpServer` class implementing the ACP JSON-RPC methods; see
+[ACP Protocol](/docs/developer/acp-protocol) for the full method/error-code reference.
+
+### `messages.ts`
+
+Zod schemas for JSON-RPC requests and every ACP method's params
+(`InitializeParamsSchema`, `SessionNewParamsSchema`, `SessionPromptParamsSchema`,
+`RunAgentParamsSchema`).
+
+## Storage (`src/storage/`)
+
+### `sqlite.ts`
+
+`SQLiteCheckpointer` implementing LangGraph's `BaseCheckpointSaver` on top of the
+`sqlite3` package, with WAL-mode PRAGMAs for performance. See
+[Architecture](/docs/developer/architecture#persistence-layer).
+
+### `s3.ts`
+
+`S3Wrapper` providing `uploadState`/`downloadState`/`deleteState`, backed by
+`@aws-sdk/client-s3` or an in-memory `Map` fallback.
+
+## Utils (`src/utils/`)
+
+### `model.ts`
+
+`createChatModel(temperature)` - returns a `ChatGoogleGenerativeAI` if
+`GOOGLE_API_KEY` is set, otherwise a `ChatOpenAI` (`gpt-4-turbo`) if `OPENAI_API_KEY` is
+set, otherwise throws.
+
+### `messages.ts`
+
+`isAIMessage`, `isHumanMessage`, `getMessageContent` - defensive type guards/content
+extractors that work for both live LangChain message class instances and
+deserialized plain objects (e.g. after a checkpoint round-trip).
+
+### `logger.ts`
+
+Centralized logger writing colorized console output plus a plain-text `agent.log` file
+in the project root, gated by the `LOG_LEVEL` environment variable
+(`DEBUG` < `INFO` < `WARN` < `ERROR`, default `INFO`).
+
+## Scripts
+
+### `src/scripts/ingest.ts`
+
+Walks a source documents directory tree, splits files into paragraph-level chunks, and
+writes them (tagged with an `area`) into `src/storage/vector-store.json`. Supports a
+`--remote` flag (`npm run ingest:remote`) for ingesting from a remote source.

@@ -1,0 +1,8 @@
+{
+  "label": "Developer & Technical Documentation",
+  "position": 3,
+  "link": {
+    "type": "generated-index",
+    "description": "Project structure, architecture, infrastructure, and source code reference for contributors."
+  }
+}

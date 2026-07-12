@@ -1,0 +1,59 @@
+---
+sidebar_position: 5
+---
+
+# Infrastructure
+
+The service is designed to run both locally (with local SQLite/mock storage) and as a
+cloud-native deployment on AWS, provisioned via Terraform (`terraform/`).
+
+## AWS resources (`terraform/main.tf`)
+
+| Resource | Purpose |
+| --- | --- |
+| `aws_ecr_repository.agent_server` | Docker image registry for the service (image scanning enabled on push). |
+| `aws_iam_role.ecs_execution` / `ecs_task` / `ecs_infrastructure` | IAM roles for the ECS task execution, the running task itself, and the ECS-managed infrastructure. |
+| `aws_iam_policy.ecs_ssm_access` | Grants read access to the SSM Parameter Store secrets consumed by the task (GitHub token, OpenAI key, app API key). |
+| `aws_ecs_cluster.main` | The ECS cluster hosting the service. |
+| `aws_ecs_express_gateway_service.agent_service` | The ECS Express Gateway service running the container and exposing an HTTP ingress endpoint. |
+| `aws_cloudfront_distribution.agent_cdn` | CDN in front of the ECS service endpoint, with caching disabled and headers forwarded to support SSE streaming. |
+
+Secrets (GitHub token, OpenAI API key, app API key) are read from AWS SSM Parameter
+Store at `/${project_name}/${environment}/<secret_name>` rather than being passed as
+plain Terraform variables.
+
+## Variables (`terraform/variables.tf`)
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `aws_region` | `us-east-1` | Primary deployment region. |
+| `project_name` | `pinky-and-the-brain-agents` | Prefix used for all resource names. |
+| `environment` | `dev` | Deployment environment name. |
+| `langchain_tracing_v2` | `true` | Whether LangSmith tracing is enabled in the deployed environment. |
+| `langchain_api_key` | (sensitive, no default) | LangSmith API key for the deployed environment. |
+| `langchain_project` | `pinky-and-the-brain-agents` | LangSmith project name. |
+
+Copy `terraform/terraform.tfvars.example` to `terraform.tfvars` and fill in
+environment-specific values before running Terraform.
+
+## Outputs (`terraform/outputs.tf`)
+
+- `apprunner_service_url` - the direct ECS Express service ingress URL.
+- `ecr_repository_url` - the ECR repository URL to push Docker images to.
+- `cloudfront_service_url` - the stable, public CloudFront URL for the deployed
+  service.
+
+## Deployment flow
+
+1. `npm run build` compiles the TypeScript service.
+2. `Dockerfile` performs a multi-stage build, producing a minimal production image.
+3. `npm run deploy` (`scripts/deploy.js`) builds the Docker image, pushes it to ECR,
+   and runs Terraform to apply/update the AWS infrastructure.
+4. `npm run report-infra` (`scripts/report-infra.ps1`) audits the live AWS
+   infrastructure status.
+5. `npm run tail-logs` streams logs from the running cloud container.
+
+## Required IAM permissions
+
+`terraform/aws-required-permissions.json` documents the minimum IAM permission set an
+operator's AWS credentials need in order to run `terraform apply` for this stack.

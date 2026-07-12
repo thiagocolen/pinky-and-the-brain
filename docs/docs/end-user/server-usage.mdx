@@ -1,0 +1,76 @@
+---
+sidebar_position: 4
+---
+
+# REST & SSE Server Usage
+
+The Express REST API (`src/server.ts`) exposes the agent workflow over HTTP, with
+Server-Sent Events (SSE) for real-time progress streaming, plus Slack and Microsoft
+Teams webhook receivers.
+
+## Starting the server
+
+```bash
+npm run server
+```
+
+By default the server listens on port `8080` (override with the `PORT` environment
+variable). All routes except `/` and `/health` require an `X-API-Key` header matching
+`PATBA_API_KEY` (see [Configuration](/docs/end-user/configuration)).
+
+## Health checks
+
+```bash
+curl http://localhost:8080/health
+```
+
+## Creating a thread and running the agent
+
+1. Create a thread:
+
+   ```bash
+   curl -X POST http://localhost:8080/threads \
+     -H "X-API-Key: your_secret_api_key_here"
+   # => {"thread_id": "thread_xxxxxxxxxxxxx"}
+   ```
+
+2. Start a run on that thread:
+
+   ```bash
+   curl -X POST http://localhost:8080/threads/thread_xxxxxxxxxxxxx/runs \
+     -H "X-API-Key: your_secret_api_key_here" \
+     -H "Content-Type: application/json" \
+     -d '{"agentName": "the-brain", "prompt": "Explain Conway'"'"'s Game of Life", "wait": false}'
+   # => {"run_id": "run_yyyyyyyyyyyyy", "status": "running"}
+   ```
+
+   Pass `"wait": true` to block the HTTP request until the run finishes and receive the
+   full result in the response body instead of polling/streaming.
+
+3. Stream progress via Server-Sent Events:
+
+   ```bash
+   curl -N http://localhost:8080/threads/thread_xxxxxxxxxxxxx/runs/run_yyyyyyyyyyyyy/stream \
+     -H "X-API-Key: your_secret_api_key_here"
+   ```
+
+   The stream emits `connected`, `progress`, and `complete` events as
+   `data: <json>\n\n` frames.
+
+## Endpoint reference
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/` , `/health` | Unauthenticated health checks. |
+| `POST` | `/threads` | Create a new thread ID. |
+| `POST` | `/threads/:thread_id/runs` | Start a workflow run (`agentName`, `prompt`, optional `wait`). |
+| `GET` | `/threads/:thread_id/runs/:run_id/stream` | SSE stream of progress/completion events for a run. |
+| `POST` | `/webhooks/slack` | Slack Events API receiver (handles `url_verification` and message events, replies via `chat.postMessage` if `SLACK_BOT_TOKEN` is set). |
+| `POST` | `/webhooks/teams` | Microsoft Teams webhook receiver (acknowledges and processes asynchronously). |
+
+## Slack integration
+
+Set `SLACK_BOT_TOKEN` and point your Slack app's Events API request URL at
+`/webhooks/slack`. Incoming, non-bot messages are routed through the agent workflow
+(thread ID derived from the Slack channel), and the response is posted back to the same
+channel.

@@ -1,0 +1,69 @@
+---
+sidebar_position: 1
+---
+
+# Installation
+
+## Prerequisites
+
+- **Node.js**: `v20.x` or higher
+- **npm**: `v10.x` or higher
+
+## Clone and install
+
+1. Clone the repository and navigate into the project directory:
+
+   ```bash
+   git clone https://github.com/thiagocolen/pinky-and-the-brain.git
+   cd pinky-and-the-brain
+   ```
+
+2. Install dependencies:
+
+   ```bash
+   npm install
+   ```
+
+3. Create a `.env` file in the root directory (see
+   [Configuration](/docs/end-user/configuration) for the full list of variables):
+
+   ```env
+   # LLM API Keys (At least one is required)
+   GOOGLE_API_KEY=your_gemini_api_key_here
+   OPENAI_API_KEY=your_openai_api_key_here
+
+   # API Gateway security key (Required for server and clients)
+   PATBA_API_KEY=your_secret_api_key_here
+
+   # Local Storage
+   SQLITE_DB_PATH=state.db
+   PORT=8080
+
+   # AWS Configuration (Optional, falls back to local sqlite/memory offline)
+   AWS_REGION=sa-east-1
+   S3_BUCKET_NAME=pinky-and-the-brain-agents-state-store
+
+   # Optional integrations
+   SLACK_BOT_TOKEN=your_slack_bot_token_here
+   ```
+
+## Build the project
+
+Compile TypeScript into JavaScript:
+
+```bash
+npm run build
+```
+
+The compiled output is emitted to `dist/`, which is what every `npm run <entrypoint>`
+script executes.
+
+## Next steps
+
+Once installed and built, jump to one of the entrypoint guides:
+
+- [CLI Usage](/docs/end-user/cli-usage) - a local interactive REPL.
+- [REST/SSE Server Usage](/docs/end-user/server-usage) - an HTTP API with streaming.
+- [MCP Usage](/docs/end-user/mcp-usage) - a stdio MCP server for MCP clients.
+- [ACP & Zed Bridge Usage](/docs/end-user/acp-usage) - the raw ACP protocol and Zed
+  Editor integration (via `patb-cli`).

@@ -1,0 +1,50 @@
+---
+sidebar_position: 2
+---
+
+# Configuration
+
+Configuration is loaded and validated by `src/config.ts` using a
+[Zod](https://zod.dev) schema. Values are read from environment variables, with `.env`
+files loaded in the following order (later values override earlier ones):
+
+1. `.env` in the current working directory (if present).
+2. `.env` in the project root (fallback).
+
+## Required variables
+
+| Variable | Description |
+| --- | --- |
+| `OPENAI_API_KEY` or `GOOGLE_API_KEY` | At least one LLM provider key is required. `src/utils/model.ts` prefers Google Gemini when `GOOGLE_API_KEY` is set, otherwise falls back to OpenAI. |
+| `PATBA_API_KEY` (or `API_KEY` / `AWS_APP_API_KEY`) | Shared secret used to authenticate REST API requests (see the `X-API-Key` header in [Server Usage](/docs/end-user/server-usage)). |
+
+`validateConfig()` throws at startup if neither LLM key nor `PATBA_API_KEY` is
+configured, for every entrypoint (`index.ts`, `cli.ts`, `server.ts`, `mcp.ts`).
+
+## Optional variables
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model name used when `GOOGLE_API_KEY` is set. |
+| `NODE_ENV` | `development` | Runtime environment name. |
+| `SQLITE_DB_PATH` | `state.db` | Path to the local SQLite checkpoint database (relative paths are resolved against the project root). |
+| `PORT` | `8080` | Port used by the Express REST/SSE server. |
+| `AWS_REGION` | `sa-east-1` | AWS region used by the S3 storage client. |
+| `S3_BUCKET_NAME` (or `AWS_S3_BUCKET`) | `pinky-and-the-brain-agents-state-store-dev-094094788286` | S3 bucket used to persist state in cloud environments. |
+| `SLACK_BOT_TOKEN` | unset | Enables the `/webhooks/slack` reply flow. Logged as an informational message (not a hard error) when missing. |
+| `LANGCHAIN_TRACING_V2` / `LANGSMITH_TRACING` | `false` | Enables LangSmith tracing. |
+| `LANGCHAIN_API_KEY` / `LANGSMITH_API_KEY` | unset | Required for LangSmith tracing to actually send traces. |
+| `LANGCHAIN_PROJECT` / `LANGSMITH_PROJECT` | `pinky-and-the-brain-agents` | LangSmith project name. |
+
+## AWS credentials and the S3 fallback
+
+`src/storage/s3.ts` checks for `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` or
+`AWS_CONTAINER_CREDENTIALS_RELATIVE_URI` (the latter is set automatically inside ECS).
+If neither is present, the service transparently falls back to an **in-memory mock
+store**, so local development works without any AWS credentials configured.
+
+## API key masking
+
+The REST server validates the `X-API-Key` request header against `PATBA_API_KEY` using
+`validateApiKey()` in `src/config.ts`; unauthorized requests receive `401` responses
+before reaching any route handler.
