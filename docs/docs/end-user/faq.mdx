@@ -1,0 +1,66 @@
+---
+sidebar_position: 8
+---
+
+# FAQ
+
+### What is "The Brain" and why does the agent talk like a cartoon character?
+
+The supervisor node (`src/agents/the-brain.ts`) roleplays as "The Brain" from the
+*Pinky and the Brain* cartoon, addressing you as "Pinky". It detects the topic of your
+question and either routes it to a specialist agent with a one-line persona
+introduction, or explains (mostly in plain, structured markdown) which specialist areas
+are available if none match.
+
+### What topics can the specialists help with?
+
+Four specialist areas are currently implemented in `src/agents/specialists.ts`,
+detected by keyword matching in `detectArea()`:
+
+- **AWS Tutor** - AWS Certified Cloud Practitioner (CLF-C02) exam prep.
+- **Cellular Automata** - Conway's Game of Life, Lenia, and related rules.
+- **English Certification Instructor** - IELTS, TOEFL, and Cambridge exam coaching.
+- **Job Technical Interviewer** - roadmaps and mock interviews for frontend/backend
+  roles.
+
+### Do I need both `OPENAI_API_KEY` and `GOOGLE_API_KEY`?
+
+No, only one is required. `src/utils/model.ts` prefers Gemini (`GOOGLE_API_KEY`) and
+falls back to OpenAI (`OPENAI_API_KEY`) if Gemini is not configured. If neither is set,
+`validateConfig()` throws at startup for every entrypoint.
+
+### What happens if I run the service without any LLM API key?
+
+The service is designed to fail fast: `validateConfig()` throws an error and every
+entrypoint (`index.ts`, `cli.ts`, `server.ts`, `mcp.ts`) exits immediately if neither
+`OPENAI_API_KEY` nor `GOOGLE_API_KEY` is set. However, the specialist nodes themselves
+contain a mock-response branch that is used internally whenever no LLM key is present at
+invocation time, returning a placeholder lesson/quiz instead of calling out to an LLM.
+
+### Do I need AWS credentials to run the service locally?
+
+No. `src/storage/s3.ts` automatically falls back to an in-memory mock store when AWS
+credentials (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` or the ECS-injected
+`AWS_CONTAINER_CREDENTIALS_RELATIVE_URI`) are not present. Local conversation state is
+always persisted via the SQLite checkpointer regardless of AWS configuration.
+
+### Which entrypoint should I use?
+
+- Use the [CLI](/docs/end-user/cli-usage) for quick local testing.
+- Use the [REST/SSE server](/docs/end-user/server-usage) to integrate with web clients,
+  Slack, or Teams.
+- Use the [MCP server](/docs/end-user/mcp-usage) to expose the agent to MCP clients like
+  Claude Desktop.
+- Use the [raw ACP server](/docs/end-user/acp-usage) (or, for most editor
+  integrations, the companion `patb-cli` project) to integrate with the Zed Editor.
+
+### How is conversation state persisted across turns?
+
+Every workflow run is scoped to a `thread_id`. The `SQLiteCheckpointer`
+(`src/storage/sqlite.ts`) persists LangGraph checkpoints for each thread locally in
+`state.db` (configurable via `SQLITE_DB_PATH`), so subsequent runs with the same
+`thread_id` resume from prior state.
+
+### Where can I ask more questions or report issues?
+
+Open an issue on [GitHub](https://github.com/thiagocolen/pinky-and-the-brain/issues).

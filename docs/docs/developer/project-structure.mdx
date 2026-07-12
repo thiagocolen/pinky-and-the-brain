@@ -1,0 +1,69 @@
+---
+sidebar_position: 1
+---
+
+# Project Structure
+
+```
+pinky-and-the-brain/
+  docs/                               # Docusaurus documentation website (this site)
+  terraform/                          # AWS Cloud IaC configuration
+    main.tf                           # ECR, ECS cluster, ECS Express Gateway service, CloudFront, IAM
+    variables.tf                      # Deployment settings & regional variables
+    outputs.tf                        # AWS service endpoints (App Runner/CloudFront/ECR)
+  src/
+    index.ts                          # Raw ACP stdin/stdout entrypoint
+    cli.ts                            # Standalone interactive REPL CLI
+    server.ts                         # Express REST API (HTTP, SSE streaming, Slack/Teams webhooks)
+    mcp.ts                            # Model Context Protocol (MCP) server
+    graph-sdk.ts                      # SDK exports for modular reuse of the graph engine
+    config.ts                         # Configuration parser & Zod schema validator
+    agents/                           # Agent graph & definitions
+      types.ts                        # Graph workspace shared state schema
+      graph.ts                        # LangGraph orchestration compilation
+      the-brain.ts                    # Central router/supervisor, roleplay persona
+      specialists.ts                  # Core RAG retrieval nodes (4 specialist areas)
+    protocol/                         # ACP JSON-RPC standard parsing
+      acp-server.ts                   # ACP protocol handler
+      messages.ts                     # Validation schemas (Zod)
+    storage/                          # State persistence
+      sqlite.ts                       # SQLiteCheckpointer extending LangGraph's BaseCheckpointSaver
+      s3.ts                           # S3 storage client wrapper (with offline local fallback)
+      vector-store.json               # Pre-compiled vector database
+    scripts/
+      ingest.ts                       # Rebuilds the local vector store from source documents
+    utils/                            # Shared utilities
+      logger.ts                       # Centralized console and file logger (agent.log & stderr)
+      messages.ts                     # LangChain message helper functions
+      model.ts                        # LLM factory (OpenAI and Google Gemini switcher)
+    tests/
+      unit/                           # Vitest unit tests
+      integration/                    # Vitest integration tests
+  scripts/                            # Deploy & operations scripts
+    deploy.js                         # Deploy orchestration script (Docker build, ECR push, Terraform run)
+    report-infra.ps1                  # PowerShell script for AWS infrastructure status audits
+    tail-logs.js                      # Script to stream cloud container logs
+    test-tracing.js                   # Script to verify LangSmith tracing connection
+  Dockerfile                          # Multi-stage container build
+  langgraph.json                      # LangGraph Studio / CLI project config
+  package.json                        # Scripts & dependencies
+  tsconfig.json                       # TS compilation config
+  vitest.config.ts                    # Test runner config
+```
+
+## Module boundaries
+
+- **Entrypoints** (`src/index.ts`, `cli.ts`, `server.ts`, `mcp.ts`) each validate
+  configuration on startup, then delegate all actual work to `runGraphWorkflow()` from
+  `src/agents/graph.ts`. They differ only in transport (stdio JSON-RPC, terminal REPL,
+  HTTP/SSE, MCP stdio) and in how they format the final response.
+- **`agents/`** contains the LangGraph state machine itself: the shared state shape
+  (`types.ts`), the compiled graph (`graph.ts`), the supervisor node (`the-brain.ts`),
+  and the specialist RAG nodes (`specialists.ts`).
+- **`protocol/`** contains the ACP-specific JSON-RPC request/response handling used only
+  by `src/index.ts`.
+- **`storage/`** contains the two persistence backends: a local SQLite checkpointer used
+  by every entrypoint, and an S3 wrapper used for cloud state storage (with a
+  transparent in-memory fallback).
+- **`utils/`** contains cross-cutting helpers (logging, LangChain message type guards,
+  LLM client construction) with no dependency on any specific entrypoint or protocol.

@@ -1,0 +1,58 @@
+---
+sidebar_position: 3
+---
+
+# CLI Usage
+
+The interactive REPL CLI (`src/cli.ts`) runs the full agent workflow locally in your
+terminal, without needing any HTTP server or remote client.
+
+## Starting a session
+
+```bash
+npm run cli
+```
+
+This starts a session with a randomly generated thread ID (`cli-session-<random>`) and
+prints a banner:
+
+```
+==================================================
+ Pinky and the Brain - Interactive Agent CLI REPL
+ Session Thread ID: cli-session-abc123
+Type your message to prompt the agent workflow.
+Type 'exit' or 'quit' to end the session.
+==================================================
+```
+
+## Interacting with the agent
+
+Type a message at the `You:` prompt and press Enter. The CLI:
+
+1. Sends your message into the LangGraph workflow (`runGraphWorkflow`) using the
+   session's persistent thread ID.
+2. Streams progress updates (which node is executing) to `stderr`, so `stdout` stays
+   clean if you redirect it.
+3. Prints the final response between `---` separators once the workflow completes.
+
+Example:
+
+```
+ You: What areas can you help me with?
+
+ Agent executing...
+
+ [the-brain] Starting agent workflow for: supervisor
+--------------------------------------------------
+ Response:
+The same thing we do every night, Pinky...
+--------------------------------------------------
+```
+
+Because the thread ID stays the same for the whole session, conversation state
+(checkpoints) persists across turns via the SQLite checkpointer - see
+[Architecture](/docs/developer/architecture).
+
+## Ending a session
+
+Type `exit` or `quit` (case-insensitive) to close the REPL.

@@ -1,0 +1,70 @@
+---
+sidebar_position: 6
+---
+
+# ACP & Zed Bridge Usage
+
+The service exposes a raw **Agent Client Protocol (ACP)** server (`src/index.ts` +
+`src/protocol/acp-server.ts`) that speaks JSON-RPC 2.0 over `stdin`/`stdout`. This is
+the entrypoint used for direct IDE integrations like the Zed Editor.
+
+## Starting the raw ACP server
+
+```bash
+npm run start
+```
+
+The server reads one JSON-RPC request per line from `stdin` and writes one JSON-RPC
+response per line to `stdout`.
+
+To initialize a handshake, write this payload to `stdin`:
+
+```json
+{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2026-06-24", "capabilities": {}, "clientInfo": {"name": "test"}}}
+```
+
+See [ACP Protocol](/docs/developer/acp-protocol) for the full list of supported methods.
+
+## Recommended: connecting through `patb-cli`
+
+For most editor integrations (including Zed), you do not need to run this service
+directly. Instead, use the companion
+[`patb-cli`](https://www.npmjs.com/package/@thiagocolen/patb-cli) project, a
+lightweight client that talks to the cloud-hosted deployment of this service over
+HTTPS and re-exposes an ACP bridge locally.
+
+### Installing patb-cli
+
+```bash
+npm install -g @thiagocolen/patb-cli
+```
+
+### Configuring Zed to use patb-cli
+
+Open your Zed configuration file (`Ctrl+Shift+P` / `Cmd+Shift+P` -> `zed: open
+settings`) and register the agent server:
+
+```json
+{
+  "agent_servers": {
+    "patb-agent": {
+      "type": "custom",
+      "command": "npx",
+      "args": ["-y", "@thiagocolen/patb-cli", "--bridge"],
+      "env": {
+        "PATBA_API_KEY": "your_secret_api_key_here"
+      }
+    }
+  }
+}
+```
+
+Then, in Zed's Agent Panel, select `patb-agent` as the active agent and start
+prompting.
+
+## Running the raw ACP server against your own instance
+
+If you are hosting your own instance of this service and want an editor to talk to it
+directly over stdin/stdout (rather than through the cloud-hosted `patb-cli` gateway),
+point your editor's custom agent server configuration at `node dist/index.js` with the
+required environment variables set (see [Configuration](/docs/end-user/configuration)).

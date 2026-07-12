@@ -1,0 +1,62 @@
+---
+sidebar_position: 9
+---
+
+# Troubleshooting
+
+### `Configuration validation failed: Missing critical environment variable: Either OPENAI_API_KEY or GOOGLE_API_KEY must be provided`
+
+No LLM provider key was found. Set `GOOGLE_API_KEY` or `OPENAI_API_KEY` in your `.env`
+file or environment, then restart the process (see
+[Configuration](/docs/end-user/configuration)).
+
+### `Configuration validation failed: Missing critical environment variable: PATBA_API_KEY ...`
+
+Set `PATBA_API_KEY` (or `API_KEY` / `AWS_APP_API_KEY`) in your `.env` file or
+environment. This key is required to authenticate REST API requests and by the ACP/CLI
+entrypoints' shared validation path.
+
+### REST requests return `401 Unauthorized`
+
+Every route except `/` and `/health` requires an `X-API-Key` HTTP header equal to your
+configured `PATBA_API_KEY`. Double-check the header name (`X-API-Key`, case-insensitive)
+and value.
+
+### `No LLM API keys provided. Please set OPENAI_API_KEY or GOOGLE_API_KEY.`
+
+Thrown by `createChatModel()` in `src/utils/model.ts` when a graph node tries to invoke
+an LLM but no key is configured. Configure at least one provider key.
+
+### `SLACK_BOT_TOKEN is not set. Slack integration is disabled.`
+
+This is an informational log message, not an error. The `/webhooks/slack` endpoint will
+still receive events, but cannot post responses back to Slack until `SLACK_BOT_TOKEN`
+is configured.
+
+### Local runs silently use an in-memory (non-persistent) S3 store
+
+If `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (or
+`AWS_CONTAINER_CREDENTIALS_RELATIVE_URI` inside ECS) are missing, `src/storage/s3.ts`
+logs a warning and falls back to an in-memory mock store that does not persist across
+process restarts. This is expected for local development; local SQLite checkpoints are
+unaffected.
+
+### The agent gives a generic "no specialist agent available" answer
+
+`detectArea()` in `src/agents/the-brain.ts` only routes to a specialist when your
+message contains one of a fixed set of keywords (see the [FAQ](/docs/end-user/faq) for
+the full list of topics and keywords). Rephrase your question using terms closer to the
+supported domains (e.g. "AWS", "Conway", "IELTS", "interview").
+
+### `npm run mcp` / `npm run start` prints unexpected extra text on stdout
+
+Both the MCP server and the raw ACP server rely on `stdout` being reserved exclusively
+for protocol JSON-RPC traffic. Progress logs are intentionally routed to `stderr` -
+make sure any custom logging additions follow the same convention, or downstream
+clients may fail to parse responses.
+
+### Build fails or entrypoints can't find compiled files
+
+Run `npm run build` before using any `npm run <entrypoint>` script (`start`, `cli`,
+`server`, `mcp`) - they all execute compiled output from `dist/`, not the TypeScript
+sources directly.

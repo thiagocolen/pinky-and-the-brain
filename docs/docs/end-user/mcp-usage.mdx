@@ -1,0 +1,53 @@
+---
+sidebar_position: 5
+---
+
+# MCP Usage
+
+The service can run as a **Model Context Protocol (MCP)** server (`src/mcp.ts`),
+exposing the agent workflow as a tool that MCP-compatible clients (such as Claude
+Desktop) can call.
+
+## Starting the MCP server
+
+```bash
+npm run mcp
+```
+
+This starts a stdio-based MCP server (`StdioServerTransport`). Progress updates are
+written to `stderr` so that `stdout` remains reserved for MCP JSON-RPC traffic.
+
+## The `run_agent` tool
+
+The server exposes a single tool:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `prompt` | `string` | yes | The instruction or query for the agent workspace. |
+| `agentName` | `string` | no | The agent node to invoke. Defaults to `the-brain`. Also accepts `brain`, `supervisor`, `developer`, `writer`, `instructor`, `specialist`, `publisher` for compatibility. |
+| `threadId` | `string` | no | Persistent thread ID to isolate state across calls. A random `mcp-session-<random>` ID is generated if omitted. |
+
+The tool returns a single `text` content block with the agent's final response, or an
+`isError: true` result with the error message if the workflow throws.
+
+## Configuring an MCP client
+
+Register the server with your MCP client using the compiled entrypoint, for example:
+
+```json
+{
+  "mcpServers": {
+    "pinky-and-the-brain": {
+      "command": "node",
+      "args": ["/absolute/path/to/pinky-and-the-brain/dist/mcp.js"],
+      "env": {
+        "GOOGLE_API_KEY": "your_gemini_api_key_here",
+        "PATBA_API_KEY": "your_secret_api_key_here"
+      }
+    }
+  }
+}
+```
+
+Consult your MCP client's documentation for the exact configuration file location and
+schema.

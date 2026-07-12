@@ -1,0 +1,59 @@
+---
+sidebar_position: 6
+---
+
+# Contributing
+
+## Development loop
+
+```bash
+npm install
+npm run build     # or: npm run watch
+npm run lint
+npm run test:unit
+npm run test:integration
+```
+
+Tests are written with [Vitest](https://vitest.dev) and live under
+`src/tests/unit/` and `src/tests/integration/` (see `vitest.config.ts`). Unit tests
+cover the ACP protocol handler, the supervisor/persona logic, and LLM model selection;
+the integration test exercises the compiled graph end-to-end.
+
+## Local iteration tips
+
+- Run `npm run cli` for the fastest feedback loop when working on agent/graph logic -
+  no server or protocol framing to worry about.
+- Set `LOG_LEVEL=DEBUG` to get verbose logging from `src/utils/logger.ts`, written both
+  to the console and to `agent.log` in the project root.
+- The service works fully offline (mock LLM responses, in-memory S3 fallback, local
+  SQLite) as long as `PATBA_API_KEY` is set - useful for testing entrypoints without
+  configuring real LLM credentials, though the specialist/supervisor LLM calls will
+  return placeholder text in that mode.
+
+## Documentation site development loop
+
+The documentation site lives in `docs/` and is a separate Docusaurus project with its
+own `package.json`. From the repository root:
+
+```bash
+npm run docs:install   # install docs/ dependencies
+npm run docs:start     # run the docs site locally with hot reload
+npm run docs:build     # produce a static production build in docs/build
+```
+
+When adding a new page, drop an `.mdx` file under `docs/docs/end-user/` or
+`docs/docs/developer/` - the sidebar is auto-generated from the folder structure
+(`docs/sidebars.ts`), so no manual sidebar edits are required. Set `sidebar_position`
+frontmatter to control ordering within a section.
+
+## Conventions
+
+- The codebase is ESM (`"type": "module"` in `package.json`); import compiled `.js`
+  extensions in relative imports (e.g. `from "./config.js"`), even though the source
+  files are `.ts`.
+- Configuration is centralized in `src/config.ts` - add new environment variables to
+  the Zod schema there rather than reading `process.env` directly elsewhere.
+- New specialist domains should follow the existing pattern in
+  `src/agents/specialists.ts`: add a keyword branch to `detectArea()` in
+  `the-brain.ts`, a new graph node wrapping `runSpecialistNode()`, and register the
+  node + routing edges in `src/agents/graph.ts`.
