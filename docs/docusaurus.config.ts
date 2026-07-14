@@ -49,11 +49,12 @@ const config: Config = {
   ],
 
   themeConfig: {
+    image: 'img/docusaurus-social-card.jpg',
     navbar: {
       title: 'Pinky and the Brain',
       logo: {
         alt: 'Pinky and the Brain Logo',
-        src: 'img/logo.svg',
+        src: 'img/logo.png',
       },
       items: [
         {
