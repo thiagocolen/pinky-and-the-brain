@@ -2,29 +2,68 @@
  * Any CSS included here will be global. The classic template
  * bundles Infima by default. Infima is a CSS framework designed to
  * work well for content-centric websites.
+ *
+ * Color palette source: static/patb-img/patb-logo.png, sampled programmatically
+ * (quantized pixel clustering + HSL classification) rather than eyeballed:
+ *   - brand navy/blue  #206090 - the badge ring & lettering blue, used as
+ *     --ifm-color-primary (light mode)
+ *   - brand cream      #fff8e8 - the badge's paper background, used as the
+ *     page background
+ *   - brand gold       #ffc018 - the rope border / stars / ribbon fill
+ *   - brand red        #f05048 - the nose / stars / accent red
+ *   - brand navy-darkest #164364 - used for the dark-style footer
+ * The dark-mode primary ramp is *not* sampled directly (the sampled navy is
+ * far too dark to read on a dark background); it's the same hue lightened
+ * until it clears WCAG AA (4.5:1) against Infima's dark background (#1b1b1d).
+ * All primary shades are generated from their base color by shifting HSL
+ * lightness by Infima's own step pattern (+-3.5 / +-5.3 / +-10.6), keeping
+ * hue and saturation constant - the same approach the default Infima ramp
+ * uses under the hood.
  */
 
 /* You can override the default Infima variables here. */
 :root {
-  --ifm-color-primary: #2e8555;
-  --ifm-color-primary-dark: #29784c;
-  --ifm-color-primary-darker: #277148;
-  --ifm-color-primary-darkest: #205d3b;
-  --ifm-color-primary-light: #33925d;
-  --ifm-color-primary-lighter: #359962;
-  --ifm-color-primary-lightest: #3cad6e;
+  --ifm-color-primary: #206090;
+  --ifm-color-primary-dark: #1d5681;
+  --ifm-color-primary-darker: #1b517a;
+  --ifm-color-primary-darkest: #164364;
+  --ifm-color-primary-light: #236a9f;
+  --ifm-color-primary-lighter: #256fa6;
+  --ifm-color-primary-lightest: #2a7dbc;
   --ifm-code-font-size: 95%;
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+  --docusaurus-highlighted-code-line-bg: rgba(255, 192, 24, 0.15);
+
+  /* Brand accents, sampled from patb-logo.png, for decorative use outside
+     the Infima primary ramp (blockquotes, footer, highlights). */
+  --patb-color-cream: #fff8e8;
+  --patb-color-gold: #ffc018;
+  --patb-color-red: #f05048;
+  --patb-color-navy-darkest: #164364;
+  --patb-color-navy-dark: #1b517a;
+  --patb-color-navy: #206090;
+  --patb-color-navy-light: #2a7dbc;
+
+  --ifm-background-color: var(--patb-color-cream);
+  --ifm-blockquote-border-color: var(--patb-color-gold);
+}
+
+.footer--dark {
+  --ifm-footer-background-color: var(--patb-color-navy-darkest);
 }
 
 /* For readability concerns, you should choose a lighter palette in dark mode. */
 [data-theme='dark'] {
-  --ifm-color-primary: #25c2a0;
-  --ifm-color-primary-dark: #21af90;
-  --ifm-color-primary-darker: #1fa588;
-  --ifm-color-primary-darkest: #1a8870;
-  --ifm-color-primary-light: #29d5b0;
-  --ifm-color-primary-lighter: #32d8b4;
-  --ifm-color-primary-lightest: #4fddbf;
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+  --ifm-color-primary: #42a0dc;
+  --ifm-color-primary-dark: #3398d9;
+  --ifm-color-primary-darker: #2b95d8;
+  --ifm-color-primary-darkest: #2486c4;
+  --ifm-color-primary-light: #51a8df;
+  --ifm-color-primary-lighter: #59abe0;
+  --ifm-color-primary-lightest: #70b7e4;
+  --docusaurus-highlighted-code-line-bg: rgba(255, 192, 24, 0.2);
+
+  /* Dark mode keeps Infima's neutral dark background/surfaces - tinting a
+     large dark surface with the cream brand color would hurt contrast and
+     legibility, so only the primary ramp and blockquote accent carry over. */
+  --ifm-blockquote-border-color: var(--patb-color-gold);
 }

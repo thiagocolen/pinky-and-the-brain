@@ -12,7 +12,12 @@ function HomepageHeader() {
   const {siteConfig} = useDocusaurusContext();
   return (
     <header className={clsx('hero hero--primary', styles.heroBanner)}>
-      <div className="container">
+      <div className={clsx('container', styles.heroContent)}>
+        <img
+          src={require('@site/static/patb-img/patb-logo-transparent.png').default}
+          alt="Pinky and the Brain Agents"
+          className={styles.heroImage}
+        />
         <Heading as="h1" className="hero__title">
           {siteConfig.title}
         </Heading>

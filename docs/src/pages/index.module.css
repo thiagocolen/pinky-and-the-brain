@@ -4,15 +4,110 @@
  */
 
 .heroBanner {
+  --ifm-hero-text-color: var(--patb-color-cream);
   padding: 4rem 0;
   text-align: center;
   position: relative;
   overflow: hidden;
+  background-color: var(--patb-color-navy-darkest);
+}
+
+/* Animated glitch gradient: the layer is oversized (inset -20%) so the
+   skew/translate keyframes never expose an edge, and the hue-rotate runs
+   on its own filter so it doesn't wash out the dot pattern or content. */
+.heroBanner::before {
+  content: '';
+  position: absolute;
+  inset: -20%;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    45deg,
+    var(--patb-color-navy-darkest) 0%,
+    var(--patb-color-navy) 50%,
+    var(--patb-color-navy-light) 100%
+  );
+  background-size: 100% 100%;
+  animation: heroGradientGlitch 8s ease alternate infinite;
+}
+
+/* Diagonal interlocking-triangle pattern (magicpattern-style "pinwheel"
+   weave). Every stop is transparent-backed, not a solid second color, so
+   the animated gradient in ::before keeps showing through underneath. */
+.heroBanner::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background-image: linear-gradient(
+      135deg,
+      rgba(255, 248, 232, 0.10) 25%,
+      transparent 25%
+    ),
+    linear-gradient(225deg, rgba(255, 192, 24, 0.08) 25%, transparent 25%),
+    linear-gradient(315deg, rgba(255, 248, 232, 0.10) 25%, transparent 25%),
+    linear-gradient(45deg, rgba(255, 192, 24, 0.08) 25%, transparent 25%);
+  background-position: -14px 0, -14px 0, 0 0, 0 0;
+  background-size: 28px 28px;
+}
+
+.heroContent {
+  position: relative;
+  z-index: 2;
+}
+
+/* hue-rotate is kept to a narrow +-8deg swing (not a full 0-360 sweep) so
+   the glitch motion stays inside the patb-color navy family instead of
+   cycling through off-brand purple/orange/green. */
+@keyframes heroGradientGlitch {
+  0%,
+  100% {
+    transform: translate(0, 0) skew(0deg);
+    filter: hue-rotate(0deg);
+  }
+  20% {
+    transform: translate(-2px, 2px) skew(2deg);
+    filter: hue-rotate(8deg);
+  }
+  40% {
+    transform: translate(2px, -2px) skew(-2deg);
+    filter: hue-rotate(-6deg);
+  }
+  60% {
+    transform: translate(-2px, -2px) skew(2deg);
+    filter: hue-rotate(6deg);
+  }
+  80% {
+    transform: translate(2px, 2px) skew(-2deg);
+    filter: hue-rotate(-8deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .heroBanner::before {
+    animation: none;
+  }
 }
 
 @media screen and (max-width: 996px) {
   .heroBanner {
     padding: 2rem;
+  }
+}
+
+.heroImage {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+  height: auto;
+  margin: 0 auto 2rem;
+}
+
+@media screen and (max-width: 996px) {
+  .heroImage {
+    max-width: 240px;
+    margin-bottom: 1.5rem;
   }
 }
 
