@@ -4,7 +4,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
   title: 'Pinky and the Brain Agents',
-  tagline: 'Cloud-native multi-agent service on AWS, orchestrated with LangGraph.js',
+  tagline: 'A guided teaching and article-writing agent on AWS, built with Deep Agents on LangGraph.js',
   favicon: 'img/favicon.ico',
 
   // Set the production url of your site here
@@ -20,6 +20,11 @@ const config: Config = {
 
   onBrokenLinks: 'throw',
   onBrokenMarkdownLinks: 'warn',
+
+  markdown: {
+    mermaid: true,
+  },
+  themes: ['@docusaurus/theme-mermaid'],
 
   i18n: {
     defaultLocale: 'en',

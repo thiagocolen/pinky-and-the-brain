@@ -10,6 +10,9 @@ node_modules/
 .env
 .env.*
 
+# Articles written by the agent
+articles/
+
 # Database / cache
 *.db
 *.db-shm

@@ -1,37 +1,47 @@
 # Pinky and the Brain Agents Service
 
-A production-ready, cloud-native agent service deployed on AWS, orchestrated via LangGraph.js, and exposed as a service through the Agent Client Protocol (ACP) standard for IDE integration (like Zed IDE) or REST/WebSocket clients.
+A production-ready, cloud-native agent service deployed on AWS, built with [Deep Agents](https://docs.langchain.com/oss/javascript/deepagents/overview) on LangGraph.js, and exposed as a service through the Agent Client Protocol (ACP) standard for IDE integration (like Zed IDE) or REST/WebSocket clients.
 
 ---
 
-## Project Overview & Recent Changes
+## Project Overview
 
-The service has been upgraded from a local React/Ink CLI wrapper to a robust, cloud-ready backend system. 
+The service is a single agent — **The Brain** — that guides you (as Pinky) through a topic and then either teaches it or writes an article about it.
 
-### Key Improvements:
+### Key Characteristics:
 - **Cloud Architecture**: Deployed on AWS ECS / App Runner via Terraform, packaged inside Docker containers.
-- **Robust Orchestration**: Powered by a cyclic LangGraph.js execution graph.
+- **Deep Agent**: One `createDeepAgent` agent with a persona, custom tools, and a guided conversation flow.
+- **Anthropic Claude**: The only supported LLM provider (`ANTHROPIC_API_KEY`, default `claude-sonnet-5`).
 - **Local SQLite Checkpointing**: Thread states and checkpoints are saved locally via a custom SQLite checkpointer optimized for performance (using WAL mode).
-- **RAG Context Integration**: Integrates a pre-compiled vector store of curated knowledge (~1.7MB).
+- **Grounded Retrieval**: Explanations and articles are drawn from a pre-compiled store of curated knowledge (~1.7MB).
 - **Multiple Entrypoints**: Exposes Stdin/Stdout ACP, a REPL CLI, an Express REST API with Server-Sent Events (SSE) streaming support, and a Model Context Protocol (MCP) server.
 
 ---
 
 ## Core Architecture
 
-### 1. Agent Graph & Specialized Workers
-At the core of the service is a cyclic LangGraph.js execution graph compiling two main components:
-*   **The Brain (`src/agents/the-brain.ts`)**: The central routing and supervisor agent. It detects task domains (using LLM analysis and keywords) and routes queries to specialist nodes. It formats responses with a custom character roleplay dialogue (The Brain interacting with Pinky) and follows up with structured system instructions.
-*   **Specialists (`src/agents/specialists.ts`)**: The core Retrieval-Augmented Generation (RAG) agent. It matches queries against the vector store database to retrieve information on:
-    *   **AWS Tutor**: Prep materials for the AWS Certified Cloud Practitioner (CLF-C02) exam.
-    *   **Cellular Automata**: Rules and specifications of Conway's Game of Life, Lenia, and cellular automata.
-    *   **English Certification Instructor**: Coaching for IELTS, TOEFL, and Cambridge exams.
-    *   **Job Technical Interviewer**: Roadmaps and mock interview questions for frontend/backend software engineering roles.
+### 1. The Brain (`src/agents/`)
+
+One Deep Agent, assembled in `agent.ts` from a model, tools, and a system prompt. The division of labour is deliberate: **the model owns the conversation, the tools own the truth** — topics, subtopics, and source material are always read from the knowledge store, never invented.
+
+*   **Persona (`persona.ts`)**: The Brain's voice — eloquent, imperious, addressing the user as Pinky. The persona never overrides technical accuracy.
+*   **Journey (`prompts.ts`)**: The conversation flow (greet → topic → subtopic → learn or write an article → repeat) and the teaching loop (decompose → explain → test → re-explain until understood).
+*   **Tools (`tools.ts`)**: `list_topics`, `list_subtopics`, `retrieve_content`, `save_article`, `update_article`, `read_article`.
+*   **Compatibility (`graph.ts`)**: `runGraphWorkflow()` — the single function every entrypoint calls.
+
+Topics of expertise, read from the knowledge store:
+
+*   **AWS Cloud Practitioner Certification**: Prep materials for the CLF-C02 exam.
+*   **Cellular Automata**: Conway's Game of Life, Wolfram's elementary automata, Lenia, particle life.
+*   **English for Certifications**: Coaching for IELTS, TOEFL, and Cambridge exams.
+*   **Technical Interview Preparation**: Role-based roadmaps for frontend/backend software engineering roles.
+
+Articles are written to `./articles/` as markdown. See [Agent Flow](https://thiagocolen.github.io/pinky-and-the-brain/docs/developer/agent-flow) for the full journey diagram and design rationale.
 
 ### 2. State & Storage Persistence
 *   **SQLite Checkpointer (`src/storage/sqlite.ts`)**: Extends LangGraph's `BaseCheckpointSaver` to persist thread history locally inside `state.db`. Optimized using SQL PRAGMAs (`WAL`, `synchronous=OFF`, `temp_store=MEMORY`).
 *   **AWS S3 Storage (`src/storage/s3.ts`)**: Used to persist state in cloud environments, with an automatic local in-memory fallback for offline/local development.
-*   **Vector DB (`src/storage/vector-store.json`)**: Pre-compiled database with embedded source documents.
+*   **Knowledge Store (`src/storage/vector-store.json`)**: Pre-compiled, paragraph-level chunks of curated source documents, tagged by area and rebuilt with `npm run ingest`. Despite the filename it holds no embeddings — retrieval is keyword overlap.
 
 ---
 
@@ -51,11 +61,13 @@ pinky-and-the-brain/
 │   ├── mcp.ts                          # Model Context Protocol (MCP) server
 │   ├── graph-sdk.ts                    # SDK exports for modular reuse of the graph engine
 │   ├── config.ts                       # Configuration parser & Zod schema validator
-│   ├── agents/                         # Agent Graph & Definitions
-│   │   ├── types.ts                    # Graph workspace shared state schema
-│   │   ├── graph.ts                    # LangGraph orchestration compilation
-│   │   ├── the-brain.ts                # Central router, supervisor, and roleplay agent
-│   │   └── specialists.ts              # Core RAG retrieval node
+│   ├── agents/                         # The Brain (deep agent)
+│   │   ├── types.ts                    # Run state, progress & BrainAgent interface
+│   │   ├── agent.ts                    # createDeepAgent assembly (model + tools + prompt)
+│   │   ├── graph.ts                    # runGraphWorkflow compatibility layer
+│   │   ├── persona.ts                  # The Brain's voice & catchphrases
+│   │   ├── prompts.ts                  # Journey state machine & teaching loop
+│   │   └── tools.ts                    # Topics, subtopics, retrieval, article files
 │   ├── protocol/                       # ACP JSON-RPC standard parsing
 │   │   ├── acp-server.ts               # ACP Protocol handler
 │   │   └── messages.ts                 # Validation schemas (Zod)
@@ -66,7 +78,7 @@ pinky-and-the-brain/
 │   └── utils/                          # Shared utilities
 │       ├── logger.ts                   # Centralized console and file logger (agent.log & stderr)
 │       ├── messages.ts                 # Message helper functions
-│       └── model.ts                    # LLM factory (OpenAI and Google Gemini switcher)
+│       └── model.ts                    # LLM factory (Anthropic Claude only)
 ├── scripts/                            # Deploy & operations scripts
 │   ├── deploy.js                       # Deploy orchestration script (Docker build, ECR push, Terraform run)
 │   ├── report-infra.ps1                # PowerShell script for AWS infrastructure status audits
@@ -100,9 +112,9 @@ pinky-and-the-brain/
 
 3. Create a `.env` file in the root directory:
    ```env
-   # LLM API Keys (At least one is required)
-   GOOGLE_API_KEY=your_gemini_api_key_here
-   OPENAI_API_KEY=your_openai_api_key_here
+   # LLM API Key (Required - Anthropic is the only supported provider)
+   ANTHROPIC_API_KEY=your_anthropic_api_key_here
+   # ANTHROPIC_MODEL=claude-sonnet-5
 
    # API Gateway security key (Required for server and clients)
    PATBA_API_KEY=your_secret_api_key_here
@@ -136,6 +148,26 @@ You can execute the service locally under different operational interfaces:
 Run the local agent directly in your command line:
 ```bash
 npm run cli
+```
+
+Say hello and The Brain takes it from there:
+
+```
+You: hello
+Brain: Behold, Pinky, the four pillars of tonight's potential enlightenment:
+       1. AWS Cloud Practitioner Certification — ...
+       2. Cellular Automata — ...
+       ...
+You: 2
+Brain: [summary of the topic, then its subtopics]
+You: An Introduction to Conway's The Game of Life
+Brain: What is your desire? 1. Learn about it  2. Write an article about it
+You: write an article about it
+Brain: Do you have any instructions for this article?
+You: three paragraphs
+Brain: The deed is done, Pinky! The article resides at:
+       .../articles/conways-game-of-life.md
+       Shall I change anything about it?
 ```
 
 ### 2. HTTP & SSE REST Server

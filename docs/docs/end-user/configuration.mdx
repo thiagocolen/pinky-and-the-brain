@@ -15,17 +15,17 @@ files loaded in the following order (later values override earlier ones):
 
 | Variable | Description |
 | --- | --- |
-| `OPENAI_API_KEY` or `GOOGLE_API_KEY` | At least one LLM provider key is required. `src/utils/model.ts` prefers Google Gemini when `GOOGLE_API_KEY` is set, otherwise falls back to OpenAI. |
+| `ANTHROPIC_API_KEY` | Required. Anthropic is the only supported LLM provider (`src/utils/model.ts`); there is no fallback to another provider. |
 | `PATBA_API_KEY` (or `API_KEY` / `AWS_APP_API_KEY`) | Shared secret used to authenticate REST API requests (see the `X-API-Key` header in [Server Usage](/docs/end-user/server-usage)). |
 
-`validateConfig()` throws at startup if neither LLM key nor `PATBA_API_KEY` is
+`validateConfig()` throws at startup if no LLM key or no `PATBA_API_KEY` is
 configured, for every entrypoint (`index.ts`, `cli.ts`, `server.ts`, `mcp.ts`).
 
 ## Optional variables
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model name used when `GOOGLE_API_KEY` is set. |
+| `ANTHROPIC_MODEL` | `claude-sonnet-5` | Claude model name used by the agent. |
 | `NODE_ENV` | `development` | Runtime environment name. |
 | `SQLITE_DB_PATH` | `state.db` | Path to the local SQLite checkpoint database (relative paths are resolved against the project root). |
 | `PORT` | `8080` | Port used by the Express REST/SSE server. |

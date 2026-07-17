@@ -1,5 +1,5 @@
 ---
-sidebar_position: 5
+sidebar_position: 6
 ---
 
 # Infrastructure
@@ -13,14 +13,15 @@ cloud-native deployment on AWS, provisioned via Terraform (`terraform/`).
 | --- | --- |
 | `aws_ecr_repository.agent_server` | Docker image registry for the service (image scanning enabled on push). |
 | `aws_iam_role.ecs_execution` / `ecs_task` / `ecs_infrastructure` | IAM roles for the ECS task execution, the running task itself, and the ECS-managed infrastructure. |
-| `aws_iam_policy.ecs_ssm_access` | Grants read access to the SSM Parameter Store secrets consumed by the task (GitHub token, OpenAI key, app API key). |
+| `aws_iam_policy.ecs_ssm_access` | Grants read access to the SSM Parameter Store secrets consumed by the task (GitHub token, Anthropic key, app API key). |
 | `aws_ecs_cluster.main` | The ECS cluster hosting the service. |
 | `aws_ecs_express_gateway_service.agent_service` | The ECS Express Gateway service running the container and exposing an HTTP ingress endpoint. |
 | `aws_cloudfront_distribution.agent_cdn` | CDN in front of the ECS service endpoint, with caching disabled and headers forwarded to support SSE streaming. |
 
-Secrets (GitHub token, OpenAI API key, app API key) are read from AWS SSM Parameter
+Secrets (GitHub token, Anthropic API key, app API key) are read from AWS SSM Parameter
 Store at `/${project_name}/${environment}/<secret_name>` rather than being passed as
-plain Terraform variables.
+plain Terraform variables. The task consumes `/${project_name}/${environment}/anthropic_api_key`
+and injects it as `ANTHROPIC_API_KEY`, so that parameter must exist before `terraform apply`.
 
 ## Variables (`terraform/variables.tf`)
 

@@ -6,36 +6,39 @@ sidebar_position: 8
 
 ### What is "The Brain" and why does the agent talk like a cartoon character?
 
-The supervisor node (`src/agents/the-brain.ts`) roleplays as "The Brain" from the
-*Pinky and the Brain* cartoon, addressing you as "Pinky". It detects the topic of your
-question and either routes it to a specialist agent with a one-line persona
-introduction, or explains (mostly in plain, structured markdown) which specialist areas
-are available if none match.
+The agent (`src/agents/`) roleplays as "The Brain" from the *Pinky and the Brain*
+cartoon, addressing you as "Pinky". Say hello and it will greet you, list its topics of
+expertise, and guide you from there — the persona is in the delivery, but the technical
+content stays accurate. See [Agent Flow](/docs/developer/agent-flow) for the whole
+journey.
 
-### What topics can the specialists help with?
+### What topics can it help with?
 
-Four specialist areas are currently implemented in `src/agents/specialists.ts`,
-detected by keyword matching in `detectArea()`:
+Four, listed for you at the start of every conversation:
 
-- **AWS Tutor** - AWS Certified Cloud Practitioner (CLF-C02) exam prep.
-- **Cellular Automata** - Conway's Game of Life, Lenia, and related rules.
-- **English Certification Instructor** - IELTS, TOEFL, and Cambridge exam coaching.
-- **Job Technical Interviewer** - roadmaps and mock interviews for frontend/backend
-  roles.
+- **AWS Cloud Practitioner Certification** - CLF-C02 exam prep.
+- **Cellular Automata** - Conway's Game of Life, Wolfram's rules, Lenia, particle life.
+- **English for Certifications** - IELTS, TOEFL, and Cambridge exam coaching.
+- **Technical Interview Preparation** - role-based roadmaps (React, Angular, JavaScript,
+  Node.js, System Design, and more).
 
-### Do I need both `OPENAI_API_KEY` and `GOOGLE_API_KEY`?
+Once you pick a topic and a subtopic, The Brain asks whether you would like to **learn
+about it** (it teaches and tests your understanding) or **have an article written about
+it** (saved as markdown under `./articles/`).
 
-No, only one is required. `src/utils/model.ts` prefers Gemini (`GOOGLE_API_KEY`) and
-falls back to OpenAI (`OPENAI_API_KEY`) if Gemini is not configured. If neither is set,
-`validateConfig()` throws at startup for every entrypoint.
+### Which API key do I need?
 
-### What happens if I run the service without any LLM API key?
+`ANTHROPIC_API_KEY`. Anthropic is the only supported LLM provider — there is no fallback
+to another one. The model defaults to `claude-sonnet-5` and can be changed with
+`ANTHROPIC_MODEL`.
 
-The service is designed to fail fast: `validateConfig()` throws an error and every
-entrypoint (`index.ts`, `cli.ts`, `server.ts`, `mcp.ts`) exits immediately if neither
-`OPENAI_API_KEY` nor `GOOGLE_API_KEY` is set. However, the specialist nodes themselves
-contain a mock-response branch that is used internally whenever no LLM key is present at
-invocation time, returning a placeholder lesson/quiz instead of calling out to an LLM.
+### What happens if I run the service without an LLM API key?
+
+The service fails fast: `validateConfig()` throws and every entrypoint (`index.ts`,
+`cli.ts`, `server.ts`, `mcp.ts`) exits immediately when `ANTHROPIC_API_KEY` is absent.
+If the agent is somehow built without a key, `createChatModel()` throws
+`No Anthropic API key provided`. There are no mock-response fallbacks — the agent either
+talks to Claude or reports an error.
 
 ### Do I need AWS credentials to run the service locally?
 

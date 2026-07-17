@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-07-17
+
+### Added
+- **The Brain, rebuilt on Deep Agents**:
+  - Single deep agent (`src/agents/agent.ts`) replacing the supervisor/specialist graph, with a persona (`persona.ts`), a guided journey and teaching loop (`prompts.ts`), and tools (`tools.ts`).
+  - Guided flow: greet → choose a topic → choose a subtopic → learn about it or have an article written about it, then repeat.
+  - Article tools writing markdown to `./articles/` (`save_article`, `update_article`, `read_article`); updates require explicit confirmation.
+  - Teaching mode that decomposes a subtopic, tests understanding, and re-explains until an answer is genuinely correct.
+- **Agent Flow documentation** (`docs/docs/developer/agent-flow.mdx`) with a mermaid flowchart of the user journey, plus `@docusaurus/theme-mermaid`, which had never been installed — existing mermaid blocks had been rendering as plain code.
+
+### Changed
+- **Anthropic Claude is the only LLM provider**: `createChatModel()` returns `ChatAnthropic` (default `claude-sonnet-5`, override with `ANTHROPIC_MODEL`) and sends no `temperature`, which Claude Sonnet 5 rejects.
+- `runGraphWorkflow()` keeps its signature, so the CLI, REST, MCP, and ACP entrypoints are unchanged; the agent is now built lazily so importing the module does not require an API key.
+- `instructorState.explanation` returns only the latest reply rather than the accumulated thread.
+- The ECS task reads `anthropic_api_key` from SSM and injects `ANTHROPIC_API_KEY` (`terraform/main.tf`). **The `/<project>/<environment>/anthropic_api_key` parameter must exist before `terraform apply`.**
+- Empty model completions are reported instead of surfacing as a blank reply.
+
+### Removed
+- Supervisor and specialist nodes (`src/agents/the-brain.ts`, `src/agents/specialists.ts`); `retrieveContext` moved into `tools.ts` unchanged.
+- Gemini and OpenAI providers, along with `@langchain/google-genai` and `@langchain/openai`. `GOOGLE_API_KEY`, `OPENAI_API_KEY`, and `GEMINI_MODEL` are no longer read, and a missing `ANTHROPIC_API_KEY` is now an error rather than a fallback.
+- Mock-response fallbacks that returned placeholder lessons when no LLM key was configured.
+
 ## [0.2.0] - 2026-07-04
 
 ### Added

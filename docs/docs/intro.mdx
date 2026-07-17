@@ -5,17 +5,22 @@ sidebar_position: 1
 # Introduction
 
 **Pinky and the Brain Agents Service** is a production-ready, cloud-native agent
-service deployed on AWS, orchestrated via **LangGraph.js**, and exposed through the
-**Agent Client Protocol (ACP)** standard for IDE integration (like the Zed Editor), a
-REST/SSE API, and the **Model Context Protocol (MCP)**.
+service deployed on AWS, built with **Deep Agents** on **LangGraph.js**, and exposed
+through the **Agent Client Protocol (ACP)** standard for IDE integration (like the Zed
+Editor), a REST/SSE API, and the **Model Context Protocol (MCP)**.
+
+The agent is **The Brain**, who addresses you as Pinky, guides you to a topic and a
+subtopic, and then either teaches it or writes an article about it.
 
 ## Features
 
 - **Cloud Architecture** - deployed on AWS ECS via Terraform, packaged inside Docker
   containers, and fronted by a CloudFront CDN.
-- **Multi-Agent Orchestration** - a cyclic LangGraph.js execution graph routes queries
-  through a supervisor ("The Brain") to specialist Retrieval-Augmented Generation (RAG)
-  agents.
+- **A Guided Deep Agent** - one `createDeepAgent` agent with a persona, custom tools, and
+  a deliberate conversation flow. Topics, subtopics, and source material always come from
+  the knowledge store, never from the model's imagination.
+- **Anthropic Claude** - the only supported LLM provider (`ANTHROPIC_API_KEY`, default
+  `claude-sonnet-5`).
 - **Durable Persistence** - a custom SQLite checkpointer (WAL mode) for local state, with
   an S3-backed wrapper for cloud environments.
 - **Multiple Entrypoints** - stdin/stdout ACP, an interactive REPL CLI, an Express
@@ -25,20 +30,17 @@ REST/SSE API, and the **Model Context Protocol (MCP)**.
 
 ```mermaid
 graph TD
-    A[Client: Zed / REPL / REST / MCP] --> B(The Brain - supervisor)
-    B -->|route by detected domain| C[AWS Tutor]
-    B -->|route by detected domain| D[Cellular Automata]
-    B -->|route by detected domain| E[English Certification Instructor]
-    B -->|route by detected domain| F[Job Technical Interviewer]
-    C --> G[Vector Store RAG]
-    D --> G
-    E --> G
-    F --> G
+    A[Client: Zed / REPL / REST / MCP] --> B(The Brain - deep agent)
+    B <-->|topics, subtopics, source material| G[(Knowledge store)]
+    B <-->|save / update articles| I[./articles/*.md]
     B --> H[(SQLite / S3 Checkpointer)]
+    B --> J{Learn about it}
+    B --> K{Write an article}
 ```
 
-See [Architecture](/docs/developer/architecture) for a deeper look at the LangGraph
-state machine and its persistence layer.
+See [Agent Flow](/docs/developer/agent-flow) for the full user journey, and
+[Architecture](/docs/developer/architecture) for the persistence layer and the
+entrypoints around it.
 
 ## Where to go next
 
