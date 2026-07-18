@@ -29,29 +29,45 @@ Type 'exit' or 'quit' to end the session.
 
 Type a message at the `You:` prompt and press Enter. The CLI:
 
-1. Sends your message into the LangGraph workflow (`runGraphWorkflow`) using the
-   session's persistent thread ID.
-2. Streams progress updates (which node is executing) to `stderr`, so `stdout` stays
-   clean if you redirect it.
-3. Prints the final response between `---` separators once the workflow completes.
+1. Sends your message to the agent (`runGraphWorkflow`) using the session's persistent
+   thread ID.
+2. Streams progress updates to `stderr`, so `stdout` stays clean if you redirect it.
+3. Prints the final response between `---` separators once the turn completes.
 
-Example:
+Just say hello — The Brain leads from there, and you answer with a number or a name:
 
 ```
- You: What areas can you help me with?
+ You: hello
 
  Agent executing...
 
- [the-brain] Starting agent workflow for: supervisor
 --------------------------------------------------
  Response:
-The same thing we do every night, Pinky...
+Behold, Pinky, the four pillars of tonight's potential enlightenment:
+
+1. **AWS Cloud Practitioner Certification** - the CLF-C02 exam: core services,
+   infrastructure, security, and pricing.
+2. **Cellular Automata** - Conway's Game of Life, Wolfram's automata, Lenia.
+3. **English for Certifications** - IELTS, TOEFL, Cambridge.
+4. **Technical Interview Preparation** - role-based roadmaps.
+
+Which subject shall we dissect first, Pinky?
 --------------------------------------------------
 ```
 
-Because the thread ID stays the same for the whole session, conversation state
-(checkpoints) persists across turns via the SQLite checkpointer - see
-[Architecture](/docs/developer/architecture).
+Pick a topic, then a subtopic, and The Brain asks whether you want to **learn about it**
+or **write an article about it**. Articles are saved as markdown under `./articles/` and
+the file path is reported back to you. See [Agent Flow](/docs/developer/agent-flow) for
+the whole journey.
+
+Because the thread ID stays the same for the whole session, the conversation persists
+across turns via the SQLite checkpointer, which is what lets the journey span many
+turns - see [Architecture](/docs/developer/architecture).
+
+:::note
+The REPL expects an interactive terminal. Piping input (`echo "hello" | npm run cli`)
+closes `readline` after the first turn, so use it interactively for multi-turn journeys.
+:::
 
 ## Ending a session
 

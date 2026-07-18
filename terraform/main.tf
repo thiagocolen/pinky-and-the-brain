@@ -13,9 +13,9 @@ data "aws_ssm_parameter" "github_token" {
   name     = "/${var.project_name}/${var.environment}/github_token"
 }
 
-data "aws_ssm_parameter" "openai_api_key" {
+data "aws_ssm_parameter" "anthropic_api_key" {
   provider = aws.ssm_region
-  name     = "/${var.project_name}/${var.environment}/openai_api_key"
+  name     = "/${var.project_name}/${var.environment}/anthropic_api_key"
 }
 
 data "aws_ssm_parameter" "app_api_key" {
@@ -75,7 +75,7 @@ resource "aws_iam_policy" "ecs_ssm_access" {
         ]
         Resource = [
           data.aws_ssm_parameter.github_token.arn,
-          data.aws_ssm_parameter.openai_api_key.arn,
+          data.aws_ssm_parameter.anthropic_api_key.arn,
           data.aws_ssm_parameter.app_api_key.arn
         ]
       }
@@ -215,8 +215,8 @@ resource "aws_ecs_express_gateway_service" "agent_service" {
       value_from = data.aws_ssm_parameter.github_token.arn
     }
     secret {
-      name       = "OPENAI_API_KEY"
-      value_from = data.aws_ssm_parameter.openai_api_key.arn
+      name       = "ANTHROPIC_API_KEY"
+      value_from = data.aws_ssm_parameter.anthropic_api_key.arn
     }
     secret {
       name       = "AWS_APP_API_KEY"

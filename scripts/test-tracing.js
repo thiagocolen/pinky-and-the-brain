@@ -1,5 +1,5 @@
 import "../dist/config.js";
-import { ChatOpenAI } from "@langchain/openai";
+import { createChatModel } from "../dist/utils/model.js";
 import { HumanMessage } from "@langchain/core/messages";
 
 async function main() {
@@ -10,15 +10,12 @@ async function main() {
   console.log("LANGSMITH_TRACING:", process.env.LANGSMITH_TRACING);
   console.log("LANGSMITH_API_KEY:", process.env.LANGSMITH_API_KEY ? "Present (Starts with " + process.env.LANGSMITH_API_KEY.substring(0, 8) + ")" : "Not Present");
 
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Missing OPENAI_API_KEY in environment!");
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.error("Missing ANTHROPIC_API_KEY in environment!");
     process.exit(1);
   }
 
-  const model = new ChatOpenAI({
-    openAIApiKey: process.env.OPENAI_API_KEY,
-    temperature: 0,
-  });
+  const model = createChatModel();
 
   console.log("Invoking model...");
   const res = await model.invoke([new HumanMessage("Hello LangSmith Tracing!")]);

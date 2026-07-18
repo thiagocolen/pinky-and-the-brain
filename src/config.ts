@@ -50,9 +50,8 @@ if (process.env.LANGSMITH_TRACING_BACKGROUND === undefined) {
 const ConfigSchema = z.object({
   nodeEnv: z.string().default("development"),
   bucketName: z.string().default("pinky-and-the-brain-agents-state-store-dev-094094788286"),
-  openaiApiKey: z.string().default(""),
-  googleApiKey: z.string().default(""),
-  geminiModel: z.string().default("gemini-2.5-flash"),
+  anthropicApiKey: z.string().default(""),
+  anthropicModel: z.string().default("claude-sonnet-5"),
   awsRegion: z.string().default("sa-east-1"),
   patbaApiKey: z.string().default(""),
   langchainTracingV2: z.boolean().default(false),
@@ -66,9 +65,8 @@ export type AppConfig = z.infer<typeof ConfigSchema>;
 const rawConfig = {
   nodeEnv: process.env.NODE_ENV,
   bucketName: process.env.S3_BUCKET_NAME || process.env.AWS_S3_BUCKET,
-  openaiApiKey: process.env.OPENAI_API_KEY || "",
-  googleApiKey: process.env.GOOGLE_API_KEY || "",
-  geminiModel: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
+  anthropicModel: process.env.ANTHROPIC_MODEL || "claude-sonnet-5",
   awsRegion: process.env.AWS_REGION,
   patbaApiKey: process.env.PATBA_API_KEY || process.env.API_KEY || process.env.AWS_APP_API_KEY,
   langchainTracingV2: process.env.LANGCHAIN_TRACING_V2 === "true" || process.env.LANGSMITH_TRACING === "true",
@@ -94,8 +92,8 @@ export function validateApiKey(key: string): boolean {
 }
 
 export function validateConfig() {
-  if (!config.openaiApiKey && !config.googleApiKey) {
-    throw new Error("Missing critical environment variable: Either OPENAI_API_KEY or GOOGLE_API_KEY must be provided");
+  if (!config.anthropicApiKey) {
+    throw new Error("Missing critical environment variable: ANTHROPIC_API_KEY must be provided");
   }
   if (!config.patbaApiKey) {
     throw new Error("Missing critical environment variable: PATBA_API_KEY (or API_KEY / AWS_APP_API_KEY) must be provided");

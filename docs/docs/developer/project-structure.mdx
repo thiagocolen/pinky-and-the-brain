@@ -18,11 +18,13 @@ pinky-and-the-brain/
     mcp.ts                            # Model Context Protocol (MCP) server
     graph-sdk.ts                      # SDK exports for modular reuse of the graph engine
     config.ts                         # Configuration parser & Zod schema validator
-    agents/                           # Agent graph & definitions
-      types.ts                        # Graph workspace shared state schema
-      graph.ts                        # LangGraph orchestration compilation
-      the-brain.ts                    # Central router/supervisor, roleplay persona
-      specialists.ts                  # Core RAG retrieval nodes (4 specialist areas)
+    agents/                           # The Brain (deep agent)
+      types.ts                        # Run state, progress & BrainAgent interface
+      agent.ts                        # createDeepAgent assembly (model + tools + prompt)
+      graph.ts                        # runGraphWorkflow compatibility layer
+      persona.ts                      # The Brain's voice & catchphrases
+      prompts.ts                      # Journey state machine & teaching loop
+      tools.ts                        # Topics, subtopics, retrieval, article files
     protocol/                         # ACP JSON-RPC standard parsing
       acp-server.ts                   # ACP protocol handler
       messages.ts                     # Validation schemas (Zod)
@@ -35,7 +37,7 @@ pinky-and-the-brain/
     utils/                            # Shared utilities
       logger.ts                       # Centralized console and file logger (agent.log & stderr)
       messages.ts                     # LangChain message helper functions
-      model.ts                        # LLM factory (OpenAI and Google Gemini switcher)
+      model.ts                        # LLM factory (Anthropic Claude only)
     tests/
       unit/                           # Vitest unit tests
       integration/                    # Vitest integration tests
@@ -57,9 +59,10 @@ pinky-and-the-brain/
   configuration on startup, then delegate all actual work to `runGraphWorkflow()` from
   `src/agents/graph.ts`. They differ only in transport (stdio JSON-RPC, terminal REPL,
   HTTP/SSE, MCP stdio) and in how they format the final response.
-- **`agents/`** contains the LangGraph state machine itself: the shared state shape
-  (`types.ts`), the compiled graph (`graph.ts`), the supervisor node (`the-brain.ts`),
-  and the specialist RAG nodes (`specialists.ts`).
+- **`agents/`** contains the agent itself: the persona and journey prompts
+  (`persona.ts`, `prompts.ts`), the tools that supply every fact (`tools.ts`), the
+  Deep Agent assembly (`agent.ts`), and the `runGraphWorkflow()` compatibility layer
+  (`graph.ts`).
 - **`protocol/`** contains the ACP-specific JSON-RPC request/response handling used only
   by `src/index.ts`.
 - **`storage/`** contains the two persistence backends: a local SQLite checkpointer used

@@ -5,52 +5,49 @@ describe("Model Factory", () => {
     vi.resetModules();
   });
 
-  it("should return ChatGoogleGenerativeAI when googleApiKey is configured", async () => {
+  it("should return ChatAnthropic when anthropicApiKey is configured", async () => {
     vi.doMock("../../config.js", () => ({
       config: {
-        googleApiKey: "mock-google-key",
-        openaiApiKey: "",
-        geminiModel: "gemini-2.5-flash",
+        anthropicApiKey: "mock-anthropic-key",
+        anthropicModel: "claude-sonnet-5",
         patbaApiKey: "brain-master-secure-key-1234",
       },
     }));
 
     const { createChatModel } = await import("../../utils/model.js");
-    const { ChatGoogleGenerativeAI } = await import("@langchain/google-genai");
-    
-    const model = createChatModel(0.3);
-    expect(model).toBeInstanceOf(ChatGoogleGenerativeAI);
+    const { ChatAnthropic } = await import("@langchain/anthropic");
+
+    const model = createChatModel();
+    expect(model).toBeInstanceOf(ChatAnthropic);
   });
 
-  it("should return ChatOpenAI when only openaiApiKey is configured", async () => {
+  it("should use the configured Anthropic model name", async () => {
     vi.doMock("../../config.js", () => ({
       config: {
-        googleApiKey: "",
-        openaiApiKey: "mock-openai-key",
-        geminiModel: "gemini-2.5-flash",
+        anthropicApiKey: "mock-anthropic-key",
+        anthropicModel: "claude-opus-4-8",
         patbaApiKey: "brain-master-secure-key-1234",
       },
     }));
 
     const { createChatModel } = await import("../../utils/model.js");
-    const { ChatOpenAI } = await import("@langchain/openai");
-    
-    const model = createChatModel(0.3);
-    expect(model).toBeInstanceOf(ChatOpenAI);
+    const model: any = createChatModel();
+    expect(model.model).toBe("claude-opus-4-8");
   });
 
-  it("should throw an error when neither key is configured", async () => {
+  it("should throw an error when the Anthropic key is missing", async () => {
     vi.doMock("../../config.js", () => ({
       config: {
-        googleApiKey: "",
-        openaiApiKey: "",
-        geminiModel: "gemini-2.5-flash",
+        anthropicApiKey: "",
+        anthropicModel: "claude-sonnet-5",
         patbaApiKey: "brain-master-secure-key-1234",
       },
     }));
 
     const { createChatModel } = await import("../../utils/model.js");
-    
-    expect(() => createChatModel(0.3)).toThrow(/No LLM API keys provided/);
+
+    // Anthropic is the only provider: a missing key is an error, never a
+    // silent fallback to another provider.
+    expect(() => createChatModel()).toThrow(/No Anthropic API key provided/);
   });
 });
