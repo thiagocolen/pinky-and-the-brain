@@ -1,8 +1,12 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import fs from "fs";
+import os from "os";
 import path from "path";
+import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
+import { marked } from "marked";
+import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -175,6 +179,154 @@ export function resolveArticlePath(filename: string): string {
   return path.join(ARTICLES_DIR, safe);
 }
 
+/**
+ * Delivery of a finished article.
+ *
+ * Two destinations, chosen by Pinky once the article is done:
+ *  - the blog at thiagocolen.github.io, via that site's own tooling; or
+ *  - any folder on this machine.
+ */
+
+/** Path, relative to the site checkout, of the script that ingests posts. */
+export const BLOG_POST_SCRIPT = path.join("develop-tools", "add-posts-from-json.js");
+
+/** Reduces a title to the `^[a-z0-9]+(-[a-z0-9]+)*$` slug the site's script demands. */
+export function slugify(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/['\u2019]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Splits the leading `# Title` off an article.
+ *
+ * The site renders the title itself from the `title` column, so leaving the H1
+ * in `body_html` would show it twice.
+ */
+export function splitTitle(markdown: string): { title: string; body: string } {
+  const match = markdown.match(/^\s*#\s+(.+?)\s*$/m);
+  if (!match) return { title: "", body: markdown.trim() };
+  return {
+    title: match[1].trim(),
+    body: markdown.slice(match.index! + match[0].length).trim(),
+  };
+}
+
+export interface BlogPost {
+  title: string;
+  description: string | null;
+  body_html: string;
+  slug: string;
+  published_at: null;
+  cover_image: null;
+  status: "unpublished";
+  tags: string[];
+}
+
+/**
+ * Builds the post payload for the site's importer.
+ *
+ * `status` is pinned to `unpublished`: the site treats published posts as
+ * read-only and only builds published ones, so a draft is both revisable and
+ * invisible until Thiago promotes it by hand. The agent never publishes live.
+ */
+export function buildBlogPost(
+  markdown: string,
+  options: { title?: string; description?: string; tags?: string[] } = {},
+): BlogPost {
+  const split = splitTitle(markdown);
+  const title = (options.title ?? split.title).trim();
+  if (!title) {
+    throw new Error("Cannot derive a post title: pass one, or start the article with '# Title'.");
+  }
+  const slug = slugify(title);
+  if (!slug) {
+    throw new Error(`Title "${title}" produces an empty slug — it needs letters or digits.`);
+  }
+  // Keep the H1 only when the caller overrode the title, so no heading is lost.
+  const body = options.title && split.title ? markdown.trim() : split.body;
+  return {
+    title,
+    description: options.description?.trim() || null,
+    body_html: marked.parse(body, { async: false }) as string,
+    slug,
+    published_at: null,
+    cover_image: null,
+    status: "unpublished",
+    tags: options.tags ?? [],
+  };
+}
+
+/** Test seam: the importer invocation, isolated so tests need not spawn node. */
+export type PostScriptRunner = (siteDir: string, jsonPath: string) => string;
+
+const defaultRunner: PostScriptRunner = (siteDir, jsonPath) =>
+  execFileSync("node", [BLOG_POST_SCRIPT, jsonPath], {
+    cwd: siteDir,
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+let runPostScript: PostScriptRunner = defaultRunner;
+
+export function __setPostScriptRunner(runner: PostScriptRunner): void {
+  runPostScript = runner;
+}
+
+export function __resetPostScriptRunner(): void {
+  runPostScript = defaultRunner;
+}
+
+/**
+ * Hands an article to the blog by writing the importer's JSON and running it
+ * inside the site checkout. Returns the message reported back to Pinky.
+ */
+export function publishToBlog(
+  markdown: string,
+  options: { title?: string; description?: string; tags?: string[] } = {},
+): string {
+  const siteDir = config.blogSitePath;
+  if (!fs.existsSync(path.join(siteDir, BLOG_POST_SCRIPT))) {
+    return (
+      `Cannot reach the website: no ${BLOG_POST_SCRIPT} under ${siteDir}. ` +
+      `Set BLOG_SITE_PATH to a checkout of thiagocolen.github.io.`
+    );
+  }
+
+  const post = buildBlogPost(markdown, options);
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "brain-post-"));
+  const jsonPath = path.join(tmpDir, `${post.slug}.json`);
+  try {
+    fs.writeFileSync(jsonPath, JSON.stringify(post, null, 2), "utf-8");
+    const output = runPostScript(siteDir, jsonPath);
+    logger.info(`[Tools] Published "${post.title}" to the blog as a draft`);
+    return (
+      `Published "${post.title}" to thiagocolen.github.io as a draft post ` +
+      `(slug: ${post.slug}, status: unpublished). It stays invisible on the live ` +
+      `site until it is promoted to "published" there.\n\n${String(output).trim()}`
+    );
+  } catch (e: any) {
+    const detail = [e?.stderr, e?.stdout, e?.message].filter(Boolean).map(String).join("\n").trim();
+    logger.error(`[Tools] Blog publish failed: ${detail}`);
+    return `Failed to publish to the website: ${detail}`;
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
+/** Resolves a destination inside a Pinky-supplied folder, keeping the filename flat. */
+export function resolveExportPath(folder: string, filename: string): string {
+  // Callback form: a home directory containing "$" must not be read as a
+  // replacement pattern.
+  const expanded = folder.trim().replace(/^~(?=[\\/]|$)/, () => os.homedir());
+  const dir = path.resolve(process.cwd(), expanded);
+  return path.join(dir, path.basename(resolveArticlePath(filename)));
+}
+
 const listTopics = tool(
   async () => {
     const store = loadVectorStore();
@@ -294,6 +446,73 @@ const readArticle = tool(
   },
 );
 
+const publishArticle = tool(
+  async ({
+    filename,
+    description,
+    tags,
+  }: {
+    filename: string;
+    description?: string;
+    tags?: string[];
+  }) => {
+    const source = resolveArticlePath(filename);
+    if (!fs.existsSync(source)) {
+      return `No article exists at ${source}. Save it first, then publish.`;
+    }
+    try {
+      return publishToBlog(fs.readFileSync(source, "utf-8"), { description, tags });
+    } catch (e: any) {
+      return `Could not publish: ${e.message}`;
+    }
+  },
+  {
+    name: "publish_article",
+    description:
+      "Publish a saved article to the thiagocolen.github.io blog. It lands as a DRAFT (status 'unpublished'), so it is not live until Thiago promotes it on the site. Only call this after Pinky explicitly asks to publish.",
+    schema: z.object({
+      filename: z.string().describe("Filename of the saved article, e.g. 'game-of-life.md'."),
+      description: z
+        .string()
+        .optional()
+        .describe("One-sentence summary shown in the blog's post listing."),
+      tags: z
+        .array(z.string())
+        .optional()
+        .describe("Lowercase topic tags, e.g. ['cellular-automata', 'complexity']."),
+    }),
+  },
+);
+
+const exportArticle = tool(
+  async ({ filename, folder }: { filename: string; folder: string }) => {
+    const source = resolveArticlePath(filename);
+    if (!fs.existsSync(source)) {
+      return `No article exists at ${source}. Save it first, then copy it.`;
+    }
+    try {
+      const target = resolveExportPath(folder, filename);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.copyFileSync(source, target);
+      logger.info(`[Tools] Article exported to ${target}`);
+      return `Article saved to ${target}`;
+    } catch (e: any) {
+      return `Could not save the article to "${folder}": ${e.message}`;
+    }
+  },
+  {
+    name: "export_article",
+    description:
+      "Copy a saved article into a folder Pinky names. Returns the absolute path — always report that exact path to Pinky.",
+    schema: z.object({
+      filename: z.string().describe("Filename of the saved article, e.g. 'game-of-life.md'."),
+      folder: z
+        .string()
+        .describe("Destination folder Pinky provided, absolute or relative. Created if missing."),
+    }),
+  },
+);
+
 export const brainTools = [
   listTopics,
   listSubtopics,
@@ -301,4 +520,6 @@ export const brainTools = [
   saveArticle,
   updateArticle,
   readArticle,
+  publishArticle,
+  exportArticle,
 ];

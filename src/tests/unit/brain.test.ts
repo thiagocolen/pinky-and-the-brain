@@ -8,6 +8,7 @@ vi.mock("../../config.js", () => ({
     anthropicApiKey: "mock-key-for-testing",
     anthropicModel: "claude-sonnet-5",
     patbaApiKey: "mock-key-for-testing",
+    blogSitePath: "/nonexistent-site-checkout-for-tests",
   },
   projectRoot: process.cwd(),
 }));

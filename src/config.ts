@@ -57,6 +57,9 @@ const ConfigSchema = z.object({
   langchainTracingV2: z.boolean().default(false),
   langchainApiKey: z.string().default(""),
   langchainProject: z.string().default("pinky-and-the-brain-agents"),
+  // Checkout of https://github.com/thiagocolen/thiagocolen.github.io, whose
+  // develop-tools/add-posts-from-json.js script is how articles reach the blog.
+  blogSitePath: z.string().default(path.resolve(rootDir, "../thiagocolen.github.io")),
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema>;
@@ -72,6 +75,7 @@ const rawConfig = {
   langchainTracingV2: process.env.LANGCHAIN_TRACING_V2 === "true" || process.env.LANGSMITH_TRACING === "true",
   langchainApiKey: process.env.LANGCHAIN_API_KEY || process.env.LANGSMITH_API_KEY,
   langchainProject: process.env.LANGCHAIN_PROJECT || process.env.LANGSMITH_PROJECT,
+  blogSitePath: process.env.BLOG_SITE_PATH,
 };
 
 let validatedConfig: AppConfig;
@@ -91,11 +95,23 @@ export function validateApiKey(key: string): boolean {
   return key === config.patbaApiKey;
 }
 
-export function validateConfig() {
+export interface ValidateConfigOptions {
+  /**
+   * Whether PATBA_API_KEY is required. It authenticates callers of the REST API
+   * (`validateApiKey`), so only the HTTP entrypoint genuinely needs it. Local
+   * stdio entrypoints talk to a client that already has OS-level access to this
+   * process, and demanding the key there turns an unused secret into a hard
+   * startup dependency — which is exactly what MCP clients trip over, since
+   * they spawn servers with a filtered environment rather than the full one.
+   */
+  requirePatbaApiKey?: boolean;
+}
+
+export function validateConfig({ requirePatbaApiKey = true }: ValidateConfigOptions = {}) {
   if (!config.anthropicApiKey) {
     throw new Error("Missing critical environment variable: ANTHROPIC_API_KEY must be provided");
   }
-  if (!config.patbaApiKey) {
+  if (requirePatbaApiKey && !config.patbaApiKey) {
     throw new Error("Missing critical environment variable: PATBA_API_KEY (or API_KEY / AWS_APP_API_KEY) must be provided");
   }
 

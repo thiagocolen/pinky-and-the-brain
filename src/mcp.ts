@@ -5,12 +5,16 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { runGraphWorkflow } from "./agents/graph.js";
+import { resolveThreadId } from "./utils/session.js";
 import { isAIMessage, getMessageContent } from "./utils/messages.js";
 import { logger } from "./utils/logger.js";
 import { validateConfig } from "./config.js";
 
 try {
-  validateConfig();
+  // PATBA_API_KEY guards the REST API, which this entrypoint does not serve.
+  // MCP clients spawn servers with a filtered environment, so requiring an
+  // unused secret here would fail startup for no security benefit.
+  validateConfig({ requirePatbaApiKey: false });
 } catch (e: any) {
   console.error("Configuration validation failed:", e.message);
   process.exit(1);
@@ -34,22 +38,29 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     tools: [
       {
         name: "run_agent",
-        description: "Executes the multi-agent graph supervisor workflow with a specific prompt. Returns the final generated output.",
+        description:
+          "Send one message to The Brain, a guided tutor that teaches technical topics and writes articles. " +
+          "This is a MULTI-TURN conversation, not a one-shot query: The Brain leads a journey (choose a topic → " +
+          "choose a subtopic → learn it or write an article about it) and ends every reply with a question. " +
+          "Call this repeatedly, relaying the user's answer each time, to carry that conversation forward. " +
+          "Start with a greeting such as 'hello' to receive the topic menu.",
         inputSchema: {
           type: "object",
           properties: {
             prompt: {
               type: "string",
-              description: "The instruction or query for the agent workspace (e.g., 'Write an article about CDNs' or 'Explain CDNs').",
+              description: "The next message for The Brain — a greeting, a menu choice ('2'), an answer to its question, or an instruction.",
             },
             agentName: {
               type: "string",
-              description: "The agent node to invoke. Defaults to 'the-brain'. Can also be 'brain' or 'supervisor' for compatibility.",
-              enum: ["the-brain", "brain", "supervisor", "developer", "writer", "instructor", "specialist", "publisher"],
+              description: "The agent to invoke. Defaults to 'the-brain'; 'brain' and 'supervisor' are accepted aliases.",
+              enum: ["the-brain", "brain", "supervisor"],
             },
             threadId: {
               type: "string",
-              description: "Optional persistent thread ID to isolate states across runs. If not provided, a random one will be generated.",
+              description:
+                "Optional. Omit this — by default all calls share one conversation, which is what lets the journey progress. " +
+                "Pass an id only to deliberately start or resume a separate, isolated conversation.",
             },
           },
           required: ["prompt"],
@@ -68,7 +79,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const args = request.params.arguments as any;
   const prompt = args.prompt;
   const agentName = args.agentName || "the-brain";
-  const threadId = args.threadId || `mcp-session-${Math.random().toString(36).substring(7)}`;
+  const threadId = resolveThreadId(args.threadId);
 
   try {
     const result = await runGraphWorkflow(agentName, prompt, threadId, (progress) => {
