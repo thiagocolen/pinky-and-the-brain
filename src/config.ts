@@ -57,6 +57,18 @@ const ConfigSchema = z.object({
   langchainTracingV2: z.boolean().default(false),
   langchainApiKey: z.string().default(""),
   langchainProject: z.string().default("pinky-and-the-brain-agents"),
+  // The blog is a separate repository. Articles reach it as pull requests, so
+  // what we need is a clone URL rather than a path on this machine.
+  blogRepoUrl: z.string().default("https://github.com/thiagocolen/thiagocolen.github.io.git"),
+  // Base branch for those pull requests. NOT the repo's default branch: `master`
+  // still carries the retired SQLite pipeline and has no content/posts/, so an
+  // .mdx file merged there would never render. Note the sibling branch
+  // `release-v120` (no slashes) is the *old* one — these are different branches.
+  blogBaseBranch: z.string().default("release/v1.2.0"),
+  // Cover-image generation. Optional: without a key the article still publishes,
+  // just without an image. The text model stays Anthropic; this is images only.
+  geminiApiKey: z.string().default(""),
+  geminiImageModel: z.string().default("gemini-3.1-flash-lite-image"),
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema>;
@@ -72,6 +84,10 @@ const rawConfig = {
   langchainTracingV2: process.env.LANGCHAIN_TRACING_V2 === "true" || process.env.LANGSMITH_TRACING === "true",
   langchainApiKey: process.env.LANGCHAIN_API_KEY || process.env.LANGSMITH_API_KEY,
   langchainProject: process.env.LANGCHAIN_PROJECT || process.env.LANGSMITH_PROJECT,
+  blogRepoUrl: process.env.BLOG_REPO_URL,
+  blogBaseBranch: process.env.BLOG_BASE_BRANCH,
+  geminiApiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
+  geminiImageModel: process.env.GEMINI_IMAGE_MODEL,
 };
 
 let validatedConfig: AppConfig;
@@ -91,11 +107,23 @@ export function validateApiKey(key: string): boolean {
   return key === config.patbaApiKey;
 }
 
-export function validateConfig() {
+export interface ValidateConfigOptions {
+  /**
+   * Whether PATBA_API_KEY is required. It authenticates callers of the REST API
+   * (`validateApiKey`), so only the HTTP entrypoint genuinely needs it. Local
+   * stdio entrypoints talk to a client that already has OS-level access to this
+   * process, and demanding the key there turns an unused secret into a hard
+   * startup dependency — which is exactly what MCP clients trip over, since
+   * they spawn servers with a filtered environment rather than the full one.
+   */
+  requirePatbaApiKey?: boolean;
+}
+
+export function validateConfig({ requirePatbaApiKey = true }: ValidateConfigOptions = {}) {
   if (!config.anthropicApiKey) {
     throw new Error("Missing critical environment variable: ANTHROPIC_API_KEY must be provided");
   }
-  if (!config.patbaApiKey) {
+  if (requirePatbaApiKey && !config.patbaApiKey) {
     throw new Error("Missing critical environment variable: PATBA_API_KEY (or API_KEY / AWS_APP_API_KEY) must be provided");
   }
 

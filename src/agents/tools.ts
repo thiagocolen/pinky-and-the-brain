@@ -1,8 +1,13 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
+import { marked } from "marked";
+import matter from "gray-matter";
+import { generateCoverImage } from "../utils/image-gen.js";
+import { coverImagePath, publishArticleAsPullRequest } from "../utils/blog-repo.js";
 import { logger } from "../utils/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -175,6 +180,173 @@ export function resolveArticlePath(filename: string): string {
   return path.join(ARTICLES_DIR, safe);
 }
 
+/**
+ * Delivery of a finished article.
+ *
+ * Two destinations, chosen by Pinky once the article is done:
+ *  - the blog at thiagocolen.github.io, via that site's own tooling; or
+ *  - any folder on this machine.
+ */
+
+/**
+ * Reduces a title to a slug, which becomes both the filename
+ * (`content/posts/<slug>.mdx`) and the post's URL.
+ *
+ * Deliberately identical to the blog's own `develop-tools/new-post.js`, down to
+ * not stripping accents or apostrophes \u2014 "Conway's Game" becomes
+ * `conway-s-game` here exactly as it would there. A prettier slug is not worth
+ * diverging from the tool the site's author runs by hand.
+ */
+export function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Splits the leading `# Title` off an article.
+ *
+ * The site renders the title from frontmatter, so leaving the H1 in the body
+ * would show it twice.
+ */
+export function splitTitle(markdown: string): { title: string; body: string } {
+  const match = markdown.match(/^\s*#\s+(.+?)\s*$/m);
+  if (!match) return { title: "", body: markdown.trim() };
+  return {
+    title: match[1].trim(),
+    body: markdown.slice(match.index! + match[0].length).trim(),
+  };
+}
+
+export interface PostFrontmatter {
+  title: string;
+  description: string;
+  published_at: null;
+  cover_image: string;
+  status: "unpublished";
+  tags: string[];
+}
+
+export interface BuiltPost {
+  slug: string;
+  title: string;
+  frontmatter: PostFrontmatter;
+  /** Complete `.mdx` file contents: frontmatter plus body. */
+  mdx: string;
+}
+
+/**
+ * Escapes the two characters MDX treats as syntax.
+ *
+ * Post bodies are HTML inside a `.mdx` file, and MDX reads a bare `{` as the
+ * start of a JSX expression and a stray `<` as the start of a tag. Either one
+ * fails the Gatsby build for the whole site, not just this post — so a code
+ * sample containing `{ }` or `a < b` has to be neutralised. HTML entities render
+ * identically and are inert to the MDX parser.
+ *
+ * Only text *outside* tags is touched; the tags `marked` emitted must survive.
+ */
+export function escapeForMdx(html: string): string {
+  return html
+    .split(/(<[^>]*>)/)
+    .map((chunk, index) => (index % 2 === 1 ? chunk : chunk.replace(/[{}]/g, (c) => (c === "{" ? "&#123;" : "&#125;"))))
+    .join("");
+}
+
+/**
+ * Builds the `.mdx` file for a finished article.
+ *
+ * Frontmatter is serialised with gray-matter — the same library the blog's own
+ * `develop-tools/new-post.js` uses — so the output is byte-identical to a post
+ * scaffolded by hand rather than merely similar.
+ *
+ * `status` is pinned to `unpublished` and `published_at` to null. `gatsby build`
+ * only includes published posts, so the article stays invisible even after the
+ * pull request merges; promoting it is a separate, human action on the blog.
+ */
+export function buildPost(
+  markdown: string,
+  options: { title?: string; description?: string; tags?: string[]; coverImage?: string } = {},
+): BuiltPost {
+  const split = splitTitle(markdown);
+  const title = (options.title ?? split.title).trim();
+  if (!title) {
+    throw new Error("Cannot derive a post title: pass one, or start the article with '# Title'.");
+  }
+  const slug = slugify(title);
+  if (!slug) {
+    throw new Error(`Title "${title}" produces an empty slug — it needs letters or digits.`);
+  }
+  // Keep the H1 only when the caller overrode the title, so no heading is lost.
+  const body = options.title && split.title ? markdown.trim() : split.body;
+  const frontmatter: PostFrontmatter = {
+    title,
+    description: options.description?.trim() || "",
+    published_at: null,
+    cover_image: options.coverImage ?? "",
+    status: "unpublished",
+    tags: options.tags ?? [],
+  };
+  const html = escapeForMdx(marked.parse(body, { async: false }) as string);
+  return { slug, title, frontmatter, mdx: matter.stringify(`\n${html}\n`, frontmatter) };
+}
+
+/**
+ * Publishes a finished article to the blog as a pull request.
+ *
+ * Generates a cover image first (optional — a failure there costs the picture,
+ * not the article), then hands everything to the blog repo helper. Returns the
+ * sentence reported back to Pinky; never throws.
+ */
+export async function publishToBlog(
+  markdown: string,
+  options: { title?: string; description?: string; tags?: string[] } = {},
+): Promise<string> {
+  let draft: BuiltPost;
+  try {
+    draft = buildPost(markdown, options);
+  } catch (e: any) {
+    return `Could not prepare the post: ${e.message}`;
+  }
+
+  const image = await generateCoverImage(draft.title, options.description);
+  // Rebuild once the image path is known, so the frontmatter carries the cover.
+  const post = image
+    ? buildPost(markdown, { ...options, coverImage: coverImagePath(draft.slug, image.extension) })
+    : draft;
+
+  try {
+    const { prUrl, imageIncluded } = publishArticleAsPullRequest({
+      slug: post.slug,
+      title: post.title,
+      mdx: post.mdx,
+      image: image ? { bytes: image.bytes, extension: image.extension } : null,
+    });
+    logger.info(`[Tools] Opened a pull request for "${post.title}": ${prUrl}`);
+    return (
+      `Opened a pull request on thiagocolen.github.io for "${post.title}": ${prUrl}\n\n` +
+      `It adds content/posts/${post.slug}.mdx with status "unpublished"` +
+      `${imageIncluded ? ", plus a generated cover image" : " (no cover image — generation was unavailable)"}. ` +
+      `The article is NOT live and NOT merged: it is a draft awaiting review, and even once ` +
+      `merged it stays invisible on the site until it is promoted there by hand.`
+    );
+  } catch (e: any) {
+    logger.error(`[Tools] Blog publish failed: ${e.message}`);
+    return `Failed to publish to the website: ${e.message}`;
+  }
+}
+
+/** Resolves a destination inside a Pinky-supplied folder, keeping the filename flat. */
+export function resolveExportPath(folder: string, filename: string): string {
+  // Callback form: a home directory containing "$" must not be read as a
+  // replacement pattern.
+  const expanded = folder.trim().replace(/^~(?=[\\/]|$)/, () => os.homedir());
+  const dir = path.resolve(process.cwd(), expanded);
+  return path.join(dir, path.basename(resolveArticlePath(filename)));
+}
+
 const listTopics = tool(
   async () => {
     const store = loadVectorStore();
@@ -294,6 +466,73 @@ const readArticle = tool(
   },
 );
 
+const publishArticle = tool(
+  async ({
+    filename,
+    description,
+    tags,
+  }: {
+    filename: string;
+    description?: string;
+    tags?: string[];
+  }) => {
+    const source = resolveArticlePath(filename);
+    if (!fs.existsSync(source)) {
+      return `No article exists at ${source}. Save it first, then publish.`;
+    }
+    try {
+      return await publishToBlog(fs.readFileSync(source, "utf-8"), { description, tags });
+    } catch (e: any) {
+      return `Could not publish: ${e.message}`;
+    }
+  },
+  {
+    name: "publish_article",
+    description:
+      "Publish a saved article to the thiagocolen.github.io blog by opening a PULL REQUEST: it generates a cover image, then commits the post on a new branch and opens a PR for review. Returns the PR URL. The post is a DRAFT (status 'unpublished') — it is not live, and merging the PR still does not publish it. Only call this after Pinky explicitly asks to publish.",
+    schema: z.object({
+      filename: z.string().describe("Filename of the saved article, e.g. 'game-of-life.md'."),
+      description: z
+        .string()
+        .optional()
+        .describe("One-sentence summary shown in the blog's post listing."),
+      tags: z
+        .array(z.string())
+        .optional()
+        .describe("Lowercase topic tags, e.g. ['cellular-automata', 'complexity']."),
+    }),
+  },
+);
+
+const exportArticle = tool(
+  async ({ filename, folder }: { filename: string; folder: string }) => {
+    const source = resolveArticlePath(filename);
+    if (!fs.existsSync(source)) {
+      return `No article exists at ${source}. Save it first, then copy it.`;
+    }
+    try {
+      const target = resolveExportPath(folder, filename);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.copyFileSync(source, target);
+      logger.info(`[Tools] Article exported to ${target}`);
+      return `Article saved to ${target}`;
+    } catch (e: any) {
+      return `Could not save the article to "${folder}": ${e.message}`;
+    }
+  },
+  {
+    name: "export_article",
+    description:
+      "Copy a saved article into a folder Pinky names. Returns the absolute path — always report that exact path to Pinky.",
+    schema: z.object({
+      filename: z.string().describe("Filename of the saved article, e.g. 'game-of-life.md'."),
+      folder: z
+        .string()
+        .describe("Destination folder Pinky provided, absolute or relative. Created if missing."),
+    }),
+  },
+);
+
 export const brainTools = [
   listTopics,
   listSubtopics,
@@ -301,4 +540,6 @@ export const brainTools = [
   saveArticle,
   updateArticle,
   readArticle,
+  publishArticle,
+  exportArticle,
 ];
