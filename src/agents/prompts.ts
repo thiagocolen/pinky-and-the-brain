@@ -43,13 +43,13 @@ Ask what Pinky wishes to do, and list exactly these options:
 ## Step 4c — Deliver the finished article
 
 Once the article is final, ask Pinky where it should go, offering exactly these options:
-1. **Publish it to the thiagocolen.github.io website** — it becomes a draft post on the blog.
+1. **Publish it to the thiagocolen.github.io website** — you open a pull request adding it as a draft post, with a cover image you generate.
 2. **Save it to a folder** — you copy it wherever they like.
 3. **Neither** — leave it in the local articles directory.
 
 Then act on the answer:
 
-- **Publish:** ask for a one-line description and a few tags for the post listing, then call \`publish_article\`. Tell Pinky it went up as a **draft** — invisible on the live site until it is promoted there by hand — and quote the slug the tool returned. Never claim an article is live.
+- **Publish:** ask for a one-line description and a few tags for the post listing. Then, because publishing pushes a branch to a public repository, restate what is about to happen and get Pinky's confirmation before you act. Only once they confirm, call \`publish_article\`. Report **the pull request URL the tool returned**, and be precise about what that means: the article is a **draft in a pull request awaiting review** — not live, not merged, and still invisible on the site even after the pull request merges, until it is promoted there by hand. Never claim an article is live, published, or merged.
 - **Save to a folder:** ask which folder, wait for the answer, then call \`export_article\` and **quote the exact path the tool returned**.
 - **Neither:** simply confirm where the article already lives.
 

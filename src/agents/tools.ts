@@ -3,10 +3,11 @@ import { z } from "zod";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 import { marked } from "marked";
-import { config } from "../config.js";
+import matter from "gray-matter";
+import { generateCoverImage } from "../utils/image-gen.js";
+import { coverImagePath, publishArticleAsPullRequest } from "../utils/blog-repo.js";
 import { logger } from "../utils/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -187,16 +188,19 @@ export function resolveArticlePath(filename: string): string {
  *  - any folder on this machine.
  */
 
-/** Path, relative to the site checkout, of the script that ingests posts. */
-export const BLOG_POST_SCRIPT = path.join("develop-tools", "add-posts-from-json.js");
-
-/** Reduces a title to the `^[a-z0-9]+(-[a-z0-9]+)*$` slug the site's script demands. */
+/**
+ * Reduces a title to a slug, which becomes both the filename
+ * (`content/posts/<slug>.mdx`) and the post's URL.
+ *
+ * Deliberately identical to the blog's own `develop-tools/new-post.js`, down to
+ * not stripping accents or apostrophes \u2014 "Conway's Game" becomes
+ * `conway-s-game` here exactly as it would there. A prettier slug is not worth
+ * diverging from the tool the site's author runs by hand.
+ */
 export function slugify(text: string): string {
   return text
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/['\u2019]/g, "")
     .toLowerCase()
+    .trim()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 }
@@ -204,8 +208,8 @@ export function slugify(text: string): string {
 /**
  * Splits the leading `# Title` off an article.
  *
- * The site renders the title itself from the `title` column, so leaving the H1
- * in `body_html` would show it twice.
+ * The site renders the title from frontmatter, so leaving the H1 in the body
+ * would show it twice.
  */
 export function splitTitle(markdown: string): { title: string; body: string } {
   const match = markdown.match(/^\s*#\s+(.+?)\s*$/m);
@@ -216,28 +220,56 @@ export function splitTitle(markdown: string): { title: string; body: string } {
   };
 }
 
-export interface BlogPost {
+export interface PostFrontmatter {
   title: string;
-  description: string | null;
-  body_html: string;
-  slug: string;
+  description: string;
   published_at: null;
-  cover_image: null;
+  cover_image: string;
   status: "unpublished";
   tags: string[];
 }
 
+export interface BuiltPost {
+  slug: string;
+  title: string;
+  frontmatter: PostFrontmatter;
+  /** Complete `.mdx` file contents: frontmatter plus body. */
+  mdx: string;
+}
+
 /**
- * Builds the post payload for the site's importer.
+ * Escapes the two characters MDX treats as syntax.
  *
- * `status` is pinned to `unpublished`: the site treats published posts as
- * read-only and only builds published ones, so a draft is both revisable and
- * invisible until Thiago promotes it by hand. The agent never publishes live.
+ * Post bodies are HTML inside a `.mdx` file, and MDX reads a bare `{` as the
+ * start of a JSX expression and a stray `<` as the start of a tag. Either one
+ * fails the Gatsby build for the whole site, not just this post — so a code
+ * sample containing `{ }` or `a < b` has to be neutralised. HTML entities render
+ * identically and are inert to the MDX parser.
+ *
+ * Only text *outside* tags is touched; the tags `marked` emitted must survive.
  */
-export function buildBlogPost(
+export function escapeForMdx(html: string): string {
+  return html
+    .split(/(<[^>]*>)/)
+    .map((chunk, index) => (index % 2 === 1 ? chunk : chunk.replace(/[{}]/g, (c) => (c === "{" ? "&#123;" : "&#125;"))))
+    .join("");
+}
+
+/**
+ * Builds the `.mdx` file for a finished article.
+ *
+ * Frontmatter is serialised with gray-matter — the same library the blog's own
+ * `develop-tools/new-post.js` uses — so the output is byte-identical to a post
+ * scaffolded by hand rather than merely similar.
+ *
+ * `status` is pinned to `unpublished` and `published_at` to null. `gatsby build`
+ * only includes published posts, so the article stays invisible even after the
+ * pull request merges; promoting it is a separate, human action on the blog.
+ */
+export function buildPost(
   markdown: string,
-  options: { title?: string; description?: string; tags?: string[] } = {},
-): BlogPost {
+  options: { title?: string; description?: string; tags?: string[]; coverImage?: string } = {},
+): BuiltPost {
   const split = splitTitle(markdown);
   const title = (options.title ?? split.title).trim();
   if (!title) {
@@ -249,72 +281,60 @@ export function buildBlogPost(
   }
   // Keep the H1 only when the caller overrode the title, so no heading is lost.
   const body = options.title && split.title ? markdown.trim() : split.body;
-  return {
+  const frontmatter: PostFrontmatter = {
     title,
-    description: options.description?.trim() || null,
-    body_html: marked.parse(body, { async: false }) as string,
-    slug,
+    description: options.description?.trim() || "",
     published_at: null,
-    cover_image: null,
+    cover_image: options.coverImage ?? "",
     status: "unpublished",
     tags: options.tags ?? [],
   };
-}
-
-/** Test seam: the importer invocation, isolated so tests need not spawn node. */
-export type PostScriptRunner = (siteDir: string, jsonPath: string) => string;
-
-const defaultRunner: PostScriptRunner = (siteDir, jsonPath) =>
-  execFileSync("node", [BLOG_POST_SCRIPT, jsonPath], {
-    cwd: siteDir,
-    encoding: "utf-8",
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-
-let runPostScript: PostScriptRunner = defaultRunner;
-
-export function __setPostScriptRunner(runner: PostScriptRunner): void {
-  runPostScript = runner;
-}
-
-export function __resetPostScriptRunner(): void {
-  runPostScript = defaultRunner;
+  const html = escapeForMdx(marked.parse(body, { async: false }) as string);
+  return { slug, title, frontmatter, mdx: matter.stringify(`\n${html}\n`, frontmatter) };
 }
 
 /**
- * Hands an article to the blog by writing the importer's JSON and running it
- * inside the site checkout. Returns the message reported back to Pinky.
+ * Publishes a finished article to the blog as a pull request.
+ *
+ * Generates a cover image first (optional — a failure there costs the picture,
+ * not the article), then hands everything to the blog repo helper. Returns the
+ * sentence reported back to Pinky; never throws.
  */
-export function publishToBlog(
+export async function publishToBlog(
   markdown: string,
   options: { title?: string; description?: string; tags?: string[] } = {},
-): string {
-  const siteDir = config.blogSitePath;
-  if (!fs.existsSync(path.join(siteDir, BLOG_POST_SCRIPT))) {
-    return (
-      `Cannot reach the website: no ${BLOG_POST_SCRIPT} under ${siteDir}. ` +
-      `Set BLOG_SITE_PATH to a checkout of thiagocolen.github.io.`
-    );
+): Promise<string> {
+  let draft: BuiltPost;
+  try {
+    draft = buildPost(markdown, options);
+  } catch (e: any) {
+    return `Could not prepare the post: ${e.message}`;
   }
 
-  const post = buildBlogPost(markdown, options);
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "brain-post-"));
-  const jsonPath = path.join(tmpDir, `${post.slug}.json`);
+  const image = await generateCoverImage(draft.title, options.description);
+  // Rebuild once the image path is known, so the frontmatter carries the cover.
+  const post = image
+    ? buildPost(markdown, { ...options, coverImage: coverImagePath(draft.slug, image.extension) })
+    : draft;
+
   try {
-    fs.writeFileSync(jsonPath, JSON.stringify(post, null, 2), "utf-8");
-    const output = runPostScript(siteDir, jsonPath);
-    logger.info(`[Tools] Published "${post.title}" to the blog as a draft`);
+    const { prUrl, imageIncluded } = publishArticleAsPullRequest({
+      slug: post.slug,
+      title: post.title,
+      mdx: post.mdx,
+      image: image ? { bytes: image.bytes, extension: image.extension } : null,
+    });
+    logger.info(`[Tools] Opened a pull request for "${post.title}": ${prUrl}`);
     return (
-      `Published "${post.title}" to thiagocolen.github.io as a draft post ` +
-      `(slug: ${post.slug}, status: unpublished). It stays invisible on the live ` +
-      `site until it is promoted to "published" there.\n\n${String(output).trim()}`
+      `Opened a pull request on thiagocolen.github.io for "${post.title}": ${prUrl}\n\n` +
+      `It adds content/posts/${post.slug}.mdx with status "unpublished"` +
+      `${imageIncluded ? ", plus a generated cover image" : " (no cover image — generation was unavailable)"}. ` +
+      `The article is NOT live and NOT merged: it is a draft awaiting review, and even once ` +
+      `merged it stays invisible on the site until it is promoted there by hand.`
     );
   } catch (e: any) {
-    const detail = [e?.stderr, e?.stdout, e?.message].filter(Boolean).map(String).join("\n").trim();
-    logger.error(`[Tools] Blog publish failed: ${detail}`);
-    return `Failed to publish to the website: ${detail}`;
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    logger.error(`[Tools] Blog publish failed: ${e.message}`);
+    return `Failed to publish to the website: ${e.message}`;
   }
 }
 
@@ -461,7 +481,7 @@ const publishArticle = tool(
       return `No article exists at ${source}. Save it first, then publish.`;
     }
     try {
-      return publishToBlog(fs.readFileSync(source, "utf-8"), { description, tags });
+      return await publishToBlog(fs.readFileSync(source, "utf-8"), { description, tags });
     } catch (e: any) {
       return `Could not publish: ${e.message}`;
     }
@@ -469,7 +489,7 @@ const publishArticle = tool(
   {
     name: "publish_article",
     description:
-      "Publish a saved article to the thiagocolen.github.io blog. It lands as a DRAFT (status 'unpublished'), so it is not live until Thiago promotes it on the site. Only call this after Pinky explicitly asks to publish.",
+      "Publish a saved article to the thiagocolen.github.io blog by opening a PULL REQUEST: it generates a cover image, then commits the post on a new branch and opens a PR for review. Returns the PR URL. The post is a DRAFT (status 'unpublished') — it is not live, and merging the PR still does not publish it. Only call this after Pinky explicitly asks to publish.",
     schema: z.object({
       filename: z.string().describe("Filename of the saved article, e.g. 'game-of-life.md'."),
       description: z

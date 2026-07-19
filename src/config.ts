@@ -57,9 +57,18 @@ const ConfigSchema = z.object({
   langchainTracingV2: z.boolean().default(false),
   langchainApiKey: z.string().default(""),
   langchainProject: z.string().default("pinky-and-the-brain-agents"),
-  // Checkout of https://github.com/thiagocolen/thiagocolen.github.io, whose
-  // develop-tools/add-posts-from-json.js script is how articles reach the blog.
-  blogSitePath: z.string().default(path.resolve(rootDir, "../thiagocolen.github.io")),
+  // The blog is a separate repository. Articles reach it as pull requests, so
+  // what we need is a clone URL rather than a path on this machine.
+  blogRepoUrl: z.string().default("https://github.com/thiagocolen/thiagocolen.github.io.git"),
+  // Base branch for those pull requests. NOT the repo's default branch: `master`
+  // still carries the retired SQLite pipeline and has no content/posts/, so an
+  // .mdx file merged there would never render. Note the sibling branch
+  // `release-v120` (no slashes) is the *old* one — these are different branches.
+  blogBaseBranch: z.string().default("release/v1.2.0"),
+  // Cover-image generation. Optional: without a key the article still publishes,
+  // just without an image. The text model stays Anthropic; this is images only.
+  geminiApiKey: z.string().default(""),
+  geminiImageModel: z.string().default("gemini-3.1-flash-lite-image"),
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema>;
@@ -75,7 +84,10 @@ const rawConfig = {
   langchainTracingV2: process.env.LANGCHAIN_TRACING_V2 === "true" || process.env.LANGSMITH_TRACING === "true",
   langchainApiKey: process.env.LANGCHAIN_API_KEY || process.env.LANGSMITH_API_KEY,
   langchainProject: process.env.LANGCHAIN_PROJECT || process.env.LANGSMITH_PROJECT,
-  blogSitePath: process.env.BLOG_SITE_PATH,
+  blogRepoUrl: process.env.BLOG_REPO_URL,
+  blogBaseBranch: process.env.BLOG_BASE_BRANCH,
+  geminiApiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
+  geminiImageModel: process.env.GEMINI_IMAGE_MODEL,
 };
 
 let validatedConfig: AppConfig;
