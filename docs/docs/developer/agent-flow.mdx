@@ -39,14 +39,22 @@ flowchart TD
     Action -->|Learn about it| Teach
     Action -->|Write an article| Instructions["Any instructions<br/>for the article?"]
 
-    Instructions --> Compose["retrieve_content<br/>→ compose article<br/>honouring instructions"]
+    Instructions --> Compose["retrieve_content<br/>→ compose per the writing guide<br/>honouring instructions"]
     Compose --> Save["save_article<br/>→ ./articles/*.md"]
     Save --> Report["Reports the exact file path<br/>Anything to change?"]
     Report --> WantsChange{Change something?}
     WantsChange -->|Yes| Confirm["Restates the change<br/>asks for confirmation"]
     Confirm --> Update["update_article<br/>→ reports path again"]
     Update --> Report
-    WantsChange -->|No| Next
+    WantsChange -->|No| Deliver{"Where should it go?"}
+
+    Deliver -->|Publish to the blog| Ask["Asks for a description<br/>and tags, then confirms"]
+    Ask --> Publish["publish_article<br/>→ the blog's MCP server"]
+    Publish --> Relay["Relays the blog's report<br/>in full, URLs included"]
+    Relay --> Next
+    Deliver -->|Save to a folder| Export["export_article<br/>→ reports the path"]
+    Export --> Next
+    Deliver -->|Neither| Next
 
     subgraph Teach ["Teaching mode (Step 4b)"]
         direction TB
@@ -79,6 +87,56 @@ The loop never dead-ends: both branches return to *"what next?"*, which returns 
 | `save_article` | Writes markdown to `./articles/` and returns the absolute path. |
 | `update_article` | Overwrites an existing article, after Pinky confirms. |
 | `read_article` | Reads a saved article back before revising it. |
+| `publish_article` | Publishes to the blog through its own `articles` MCP server. |
+| `export_article` | Copies a finished article into a folder Pinky names. |
+
+## How an article gets written
+
+Composition is entirely prompt-driven — there is no article-generating function to read.
+Three pieces of the system prompt do the work, assembled in `src/agents/prompts.ts`:
+
+```
+BRAIN_SYSTEM_PROMPT
+  = BRAIN_PERSONA_PROMPT   (persona.ts)     — the voice
+  + ARTICLE_CRAFT_PROMPT   (prompts.ts)     — the writing standard
+  + JOURNEY_PROMPT         (prompts.ts)     — the conversation's state machine
+```
+
+For a single article the sequence is:
+
+1. **Ask for instructions.** Step 4a asks Pinky for length, tone and focus, and waits.
+2. **Retrieve the material.** `retrieve_content` returns passages from the knowledge store.
+   The model is instructed to write only from these — if retrieval returns nothing useful it
+   must say so rather than invent material.
+3. **Compose against the standard.** `ARTICLE_CRAFT_PROMPT` governs the prose: fix topic,
+   audience, purpose and stakes before drafting; three-part structure; one idea per
+   paragraph with explicit links; varied sentences; supported claims; a short title.
+   Pinky's own instructions outrank the standard where the two disagree.
+4. **Save and iterate.** `save_article` writes `./articles/<slug>.md`; revisions go through
+   `update_article`, only after Pinky confirms each change.
+5. **Deliver.** Step 4c offers the blog, a folder, or neither.
+
+Note what is *not* code: nothing enforces the structure, the length or the title cap. They
+are instructions the model follows, which is why the wording is precise and why the
+regression tests in `src/tests/unit/publishing.test.ts` assert on the prompt text itself.
+
+### Adding more detailed instructions about article creation
+
+There are four places to put article guidance, and picking the right one matters:
+
+| Where | For | Applies to |
+| --- | --- | --- |
+| `ARTICLE_CRAFT_PROMPT` (`src/agents/prompts.ts`) | Durable rules about how articles should read | Every article, always |
+| `JOURNEY_PROMPT` Step 4a/4c (`src/agents/prompts.ts`) | Changes to the *process* — what to ask, in what order, what to report | Every article, always |
+| Tool `description` / schema `.describe()` (`src/agents/tools.ts`) | Rules about a specific argument | Whenever that tool is called |
+| Pinky's answer at Step 4a | One-off requests: length, tone, focus | That article only |
+
+Most changes belong in `ARTICLE_CRAFT_PROMPT`. It is deliberately a standalone export so
+that refining how articles read never means editing the conversation's state machine.
+
+The long-form version of that standard, with the reasoning and sources behind each rule,
+is the [Article Writing Guide](./article-writing-guide) — **edit both together**, and add a
+test asserting the new rule reaches `BRAIN_SYSTEM_PROMPT` so it cannot be silently dropped.
 
 ### How subtopics are derived
 

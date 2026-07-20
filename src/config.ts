@@ -57,14 +57,12 @@ const ConfigSchema = z.object({
   langchainTracingV2: z.boolean().default(false),
   langchainApiKey: z.string().default(""),
   langchainProject: z.string().default("pinky-and-the-brain-agents"),
-  // The blog is a separate repository. Articles reach it as pull requests, so
-  // what we need is a clone URL rather than a path on this machine.
-  blogRepoUrl: z.string().default("https://github.com/thiagocolen/thiagocolen.github.io.git"),
-  // Base branch for those pull requests. NOT the repo's default branch: `master`
-  // still carries the retired SQLite pipeline and has no content/posts/, so an
-  // .mdx file merged there would never render. Note the sibling branch
-  // `release-v120` (no slashes) is the *old* one — these are different branches.
-  blogBaseBranch: z.string().default("release/v1.2.0"),
+  // The blog is a separate repository, and it owns its own publishing tools:
+  // articles are written through the `articles` MCP server that ships inside it
+  // (mcp-server/index.js). That server is stdio, so what we need is a path to a
+  // checkout on this machine rather than a clone URL. Defaults to a sibling of
+  // this project, which is the usual layout.
+  blogRepoPath: z.string().default(path.resolve(rootDir, "../thiagocolen.github.io")),
   // Cover-image generation. Optional: without a key the article still publishes,
   // just without an image. The text model stays Anthropic; this is images only.
   geminiApiKey: z.string().default(""),
@@ -84,8 +82,7 @@ const rawConfig = {
   langchainTracingV2: process.env.LANGCHAIN_TRACING_V2 === "true" || process.env.LANGSMITH_TRACING === "true",
   langchainApiKey: process.env.LANGCHAIN_API_KEY || process.env.LANGSMITH_API_KEY,
   langchainProject: process.env.LANGCHAIN_PROJECT || process.env.LANGSMITH_PROJECT,
-  blogRepoUrl: process.env.BLOG_REPO_URL,
-  blogBaseBranch: process.env.BLOG_BASE_BRANCH,
+  blogRepoPath: process.env.BLOG_REPO_PATH,
   geminiApiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
   geminiImageModel: process.env.GEMINI_IMAGE_MODEL,
 };

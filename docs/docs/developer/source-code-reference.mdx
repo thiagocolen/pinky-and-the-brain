@@ -1,5 +1,5 @@
 ---
-sidebar_position: 4
+sidebar_position: 5
 ---
 
 # Source Code Reference
@@ -123,6 +123,21 @@ Sonnet 5 rejects the parameter.
 `isAIMessage`, `isHumanMessage`, `getMessageContent` - defensive type guards/content
 extractors that work for both live LangChain message class instances and
 deserialized plain objects (e.g. after a checkpoint round-trip).
+
+### `blog-mcp.ts`
+
+The blog's own publishing tools, reached over MCP. `withBlogSession()` spawns the
+`articles` server that ships inside the thiagocolen.github.io checkout named by
+`BLOG_REPO_PATH`, runs a callback against it, and always closes the child process —
+one session per publish, since the server holds a git worktree open.
+
+`resolveBlogRepoPath()` fails with an actionable message when the checkout is missing
+or is on a branch without `mcp-server/`. Tool results are unwrapped by a helper that
+turns the MCP `isError` flag into a thrown `BlogToolError`, because the SDK resolves
+rather than rejects on it — without that, failure text would be parsed as success.
+
+`__setBlogSession` / `__resetBlogSession` are the test seam: they replace the whole
+session, so tests never spawn a process.
 
 ### `logger.ts`
 

@@ -5,9 +5,8 @@ import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
 import { marked } from "marked";
-import matter from "gray-matter";
 import { generateCoverImage } from "../utils/image-gen.js";
-import { coverImagePath, publishArticleAsPullRequest } from "../utils/blog-repo.js";
+import { BLOG_BRANCH, parseJsonResult, withBlogSession } from "../utils/blog-mcp.js";
 import { logger } from "../utils/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -184,26 +183,14 @@ export function resolveArticlePath(filename: string): string {
  * Delivery of a finished article.
  *
  * Two destinations, chosen by Pinky once the article is done:
- *  - the blog at thiagocolen.github.io, via that site's own tooling; or
+ *  - the blog at thiagocolen.github.io, through that site's own MCP server; or
  *  - any folder on this machine.
- */
-
-/**
- * Reduces a title to a slug, which becomes both the filename
- * (`content/posts/<slug>.mdx`) and the post's URL.
  *
- * Deliberately identical to the blog's own `develop-tools/new-post.js`, down to
- * not stripping accents or apostrophes \u2014 "Conway's Game" becomes
- * `conway-s-game` here exactly as it would there. A prettier slug is not worth
- * diverging from the tool the site's author runs by hand.
+ * Note what is deliberately absent here: there is no `slugify`. The slug is the
+ * blog's business \u2014 `create_draft` derives it from the title using the same
+ * module the site's own npm scripts use \u2014 and a copy of that rule living here
+ * could only ever drift away from the real one.
  */
-export function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
 
 /**
  * Splits the leading `# Title` off an article.
@@ -218,23 +205,6 @@ export function splitTitle(markdown: string): { title: string; body: string } {
     title: match[1].trim(),
     body: markdown.slice(match.index! + match[0].length).trim(),
   };
-}
-
-export interface PostFrontmatter {
-  title: string;
-  description: string;
-  published_at: null;
-  cover_image: string;
-  status: "unpublished";
-  tags: string[];
-}
-
-export interface BuiltPost {
-  slug: string;
-  title: string;
-  frontmatter: PostFrontmatter;
-  /** Complete `.mdx` file contents: frontmatter plus body. */
-  mdx: string;
 }
 
 /**
@@ -255,83 +225,112 @@ export function escapeForMdx(html: string): string {
     .join("");
 }
 
+export interface PreparedPost {
+  title: string;
+  /** MDX body: the article minus its H1, as MDX-safe HTML. */
+  body: string;
+}
+
 /**
- * Builds the `.mdx` file for a finished article.
+ * Turns a finished article into what `create_draft` wants.
  *
- * Frontmatter is serialised with gray-matter — the same library the blog's own
- * `develop-tools/new-post.js` uses — so the output is byte-identical to a post
- * scaffolded by hand rather than merely similar.
- *
- * `status` is pinned to `unpublished` and `published_at` to null. `gatsby build`
- * only includes published posts, so the article stays invisible even after the
- * pull request merges; promoting it is a separate, human action on the blog.
+ * Only the title and the body: status, `published_at`, the slug and the rest of
+ * the frontmatter are the blog server's to write, and are no longer duplicated
+ * here.
  */
-export function buildPost(
+export function preparePost(
   markdown: string,
-  options: { title?: string; description?: string; tags?: string[]; coverImage?: string } = {},
-): BuiltPost {
+  options: { title?: string } = {},
+): PreparedPost {
   const split = splitTitle(markdown);
   const title = (options.title ?? split.title).trim();
   if (!title) {
     throw new Error("Cannot derive a post title: pass one, or start the article with '# Title'.");
   }
-  const slug = slugify(title);
-  if (!slug) {
-    throw new Error(`Title "${title}" produces an empty slug — it needs letters or digits.`);
-  }
   // Keep the H1 only when the caller overrode the title, so no heading is lost.
-  const body = options.title && split.title ? markdown.trim() : split.body;
-  const frontmatter: PostFrontmatter = {
-    title,
-    description: options.description?.trim() || "",
-    published_at: null,
-    cover_image: options.coverImage ?? "",
-    status: "unpublished",
-    tags: options.tags ?? [],
-  };
-  const html = escapeForMdx(marked.parse(body, { async: false }) as string);
-  return { slug, title, frontmatter, mdx: matter.stringify(`\n${html}\n`, frontmatter) };
+  const source = options.title && split.title ? markdown.trim() : split.body;
+  return { title, body: escapeForMdx(marked.parse(source, { async: false }) as string) };
+}
+
+export interface PublishOptions {
+  title?: string;
+  /** Deck shown under the title on the post page. */
+  headline?: string;
+  /** Listing blurb. Shown on article cards, not on the post page. */
+  description?: string;
+  tags?: string[];
 }
 
 /**
- * Publishes a finished article to the blog as a pull request.
+ * Publishes a finished article through the blog's own MCP server.
  *
- * Generates a cover image first (optional — a failure there costs the picture,
- * not the article), then hands everything to the blog repo helper. Returns the
- * sentence reported back to Pinky; never throws.
+ * The sequence mirrors the flow that server documents: create the draft, learn
+ * the slug it chose, attach a cover image if one could be generated, then stage
+ * everything for review. Cover-image failure is soft, as before — it costs the
+ * picture, not the article.
+ *
+ * The staging result is relayed **verbatim** rather than parsed and reworded.
+ * That server owns what staging produces (today a compare URL, a pull request
+ * once it opens one itself), and a sentence assembled here would go stale the
+ * moment that changes. Returns what Pinky should be told; never throws.
  */
 export async function publishToBlog(
   markdown: string,
-  options: { title?: string; description?: string; tags?: string[] } = {},
+  options: PublishOptions = {},
 ): Promise<string> {
-  let draft: BuiltPost;
+  let post: PreparedPost;
   try {
-    draft = buildPost(markdown, options);
+    post = preparePost(markdown, options);
   } catch (e: any) {
     return `Could not prepare the post: ${e.message}`;
   }
 
-  const image = await generateCoverImage(draft.title, options.description);
-  // Rebuild once the image path is known, so the frontmatter carries the cover.
-  const post = image
-    ? buildPost(markdown, { ...options, coverImage: coverImagePath(draft.slug, image.extension) })
-    : draft;
+  const image = await generateCoverImage(post.title, options.description);
 
   try {
-    const { prUrl, imageIncluded } = publishArticleAsPullRequest({
-      slug: post.slug,
-      title: post.title,
-      mdx: post.mdx,
-      image: image ? { bytes: image.bytes, extension: image.extension } : null,
+    return await withBlogSession(async (call) => {
+      const created = await call("create_draft", {
+        title: post.title,
+        headline: options.headline,
+        description: options.description,
+        tags: options.tags,
+        body: post.body,
+      });
+
+      const slug = parseJsonResult<{ slug: string }>(created)?.slug;
+      if (!slug) {
+        throw new Error(`The blog created the draft but did not report a slug: ${created}`);
+      }
+
+      let coverNote = " (no cover image — generation was unavailable)";
+      if (image) {
+        // Asset first, then patch the frontmatter: `create_draft` cannot know
+        // the image URL because the URL depends on the slug it is choosing.
+        const asset = await call("add_asset", {
+          filename: `${slug}.${image.extension}`,
+          content: image.bytes.toString("base64"),
+          overwrite: true,
+        });
+        const url = parseJsonResult<{ url: string }>(asset)?.url;
+        if (url) {
+          await call("update_post", { slug, cover_image: url });
+          coverNote = ", plus a generated cover image";
+        }
+      }
+
+      const staged = await call("stage_changes", {
+        message: `content: add "${post.title}" as a draft`,
+      });
+
+      logger.info(`[Tools] Staged "${post.title}" (${slug}) on ${BLOG_BRANCH}`);
+      return (
+        `Published "${post.title}" to thiagocolen.github.io as content/posts/${slug}.mdx ` +
+        `with status "unpublished"${coverNote}.\n\n${staged}\n\n` +
+        `The article is NOT live: it is a draft on the "${BLOG_BRANCH}" branch awaiting ` +
+        `review, and even once its pull request merges it stays invisible on the site ` +
+        `until it is promoted there by hand.`
+      );
     });
-    logger.info(`[Tools] Opened a pull request for "${post.title}": ${prUrl}`);
-    return (
-      `Opened a pull request on thiagocolen.github.io for "${post.title}": ${prUrl}\n\n` +
-      `It adds content/posts/${post.slug}.mdx with status "unpublished"` +
-      `${imageIncluded ? ", plus a generated cover image" : " (no cover image — generation was unavailable)"}. ` +
-      `The article is NOT live and NOT merged: it is a draft awaiting review, and even once ` +
-      `merged it stays invisible on the site until it is promoted there by hand.`
-    );
   } catch (e: any) {
     logger.error(`[Tools] Blog publish failed: ${e.message}`);
     return `Failed to publish to the website: ${e.message}`;
@@ -469,10 +468,14 @@ const readArticle = tool(
 const publishArticle = tool(
   async ({
     filename,
+    title,
+    headline,
     description,
     tags,
   }: {
     filename: string;
+    title?: string;
+    headline?: string;
     description?: string;
     tags?: string[];
   }) => {
@@ -481,7 +484,12 @@ const publishArticle = tool(
       return `No article exists at ${source}. Save it first, then publish.`;
     }
     try {
-      return await publishToBlog(fs.readFileSync(source, "utf-8"), { description, tags });
+      return await publishToBlog(fs.readFileSync(source, "utf-8"), {
+        title,
+        headline,
+        description,
+        tags,
+      });
     } catch (e: any) {
       return `Could not publish: ${e.message}`;
     }
@@ -489,13 +497,27 @@ const publishArticle = tool(
   {
     name: "publish_article",
     description:
-      "Publish a saved article to the thiagocolen.github.io blog by opening a PULL REQUEST: it generates a cover image, then commits the post on a new branch and opens a PR for review. Returns the PR URL. The post is a DRAFT (status 'unpublished') — it is not live, and merging the PR still does not publish it. Only call this after Pinky explicitly asks to publish.",
+      "Publish a saved article to the thiagocolen.github.io blog, using the blog's own publishing tools: it generates a cover image, creates the post as a DRAFT (status 'unpublished'), attaches the image, and stages everything on the 'new-articles' branch for review. Returns what the blog reported, including the review URL — always relay that back to Pinky in full. The post is not live, and merging its pull request still does not publish it. Only call this after Pinky explicitly asks to publish.",
     schema: z.object({
       filename: z.string().describe("Filename of the saved article, e.g. 'game-of-life.md'."),
+      title: z
+        .string()
+        .optional()
+        .describe(
+          "Overrides the article's H1 as the post title. The blog derives the URL slug from this, so keep it SHORT — at most about six words. Put the longer, wittier phrasing in 'headline' instead.",
+        ),
+      headline: z
+        .string()
+        .optional()
+        .describe(
+          "The deck: a subtitle rendered under the title on the post page. This is where a long or playful phrase belongs, since it never reaches the slug.",
+        ),
       description: z
         .string()
         .optional()
-        .describe("One-sentence summary shown in the blog's post listing."),
+        .describe(
+          "One-sentence summary shown on article cards in the blog's listing — NOT on the post page itself. Different from 'headline'.",
+        ),
       tags: z
         .array(z.string())
         .optional()
