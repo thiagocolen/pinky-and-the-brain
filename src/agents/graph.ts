@@ -1,7 +1,7 @@
 import { HumanMessage } from "@langchain/core/messages";
 import { createBrainAgent, checkpointer } from "./agent.js";
 import { AgentWorkspaceState, AgentProgress, BrainAgent } from "./types.js";
-import { isAIMessage, getMessageContent } from "../utils/messages.js";
+import { isAIMessage, isHumanMessage, getMessageContent } from "../utils/messages.js";
 import { logger } from "../utils/logger.js";
 
 export { checkpointer };
@@ -46,15 +46,39 @@ function textOf(message: any): string {
   return getMessageContent(message);
 }
 
-/** Returns the text of the most recent AI message that actually said something. */
-function extractLatestReply(messages: any[]): string {
+/**
+ * Returns everything the assistant said during the turn that is now finishing.
+ *
+ * Not just the final message: a model may speak *and* call a tool in the same
+ * message, and when it does, the text and the tool call travel together. The
+ * journey ends an article delivery by reporting the pull request and then, per
+ * Step 5, calling `list_topics` to re-present the menu — so the sentence naming
+ * the pull request lives in a message that is followed by a tool call and a
+ * final menu message. Returning only the last message with text silently
+ * discarded the delivery report, which is exactly how a published article came
+ * back to the caller as a bare topic menu with no PR number, branch or link.
+ *
+ * Scanning back to the last human message bounds this to the current turn, so
+ * earlier replies in the thread are never re-sent.
+ */
+export function extractTurnReply(messages: any[]): string {
+  let start = 0;
   for (let i = messages.length - 1; i >= 0; i--) {
+    if (isHumanMessage(messages[i])) {
+      start = i + 1;
+      break;
+    }
+  }
+
+  const spoken: string[] = [];
+  for (let i = start; i < messages.length; i++) {
     const message = messages[i];
     if (!isAIMessage(message)) continue;
     const content = textOf(message).trim();
-    if (content) return content;
+    if (content) spoken.push(content);
   }
-  return "";
+
+  return spoken.join("\n\n");
 }
 
 /**
@@ -85,7 +109,7 @@ export async function runGraphWorkflow(
   );
 
   const messages = (result as any).messages ?? [];
-  let explanation = extractLatestReply(messages);
+  let explanation = extractTurnReply(messages);
 
   if (!explanation) {
     // Returning "" here would surface as a blank reply, which reads like a

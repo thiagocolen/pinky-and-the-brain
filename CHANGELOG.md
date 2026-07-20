@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **Article delivery reports no longer vanish.** A model may speak *and* call a tool in the same message, and the journey does exactly that when it finishes a publish: it reports the pull request, then calls `list_topics` to re-present the menu. `runGraphWorkflow()` returned only the *last* assistant message with text, so the sentence naming the pull request was discarded and a successful publish came back to the caller as a bare topic menu — no PR number, no branch, no link, and no sign anything had happened. It now returns everything the assistant said during the turn (`extractTurnReply`, bounded by the last human message so earlier replies are never re-sent).
+
+### Changed
+- **Publishing goes through the blog's own MCP server.** Finished articles are delivered by driving the `articles` server that ships inside thiagocolen.github.io (`create_draft` → `add_asset` → `update_post` → `stage_changes`) instead of cloning the repo and writing `.mdx` files here. The blog's frontmatter shape, slug rules, asset location and safe branch are now defined in exactly one place — `develop-tools/posts.js`, the same module the site's npm scripts use — so the two can no longer drift. The agent never calls `publish_post`: drafts stay `unpublished`, and no workflow builds `new-articles`, leaving both gates to the public site in human hands.
+- **Article slugs are short.** The blog derives the slug from the title with no override, so the title itself is now capped at about six words; longer or wittier phrasing moves to the post's `headline` (the deck under the title), which never reaches the URL. `publish_article` takes `title` and `headline` separately, as the blog's tools describe them.
+- **Articles are written to a published standard.** `ARTICLE_CRAFT_PROMPT` — topic/audience/purpose/stakes fixed before drafting, three-part structure, one idea per paragraph, varied sentences, supported claims — is now part of the system prompt, distilled from Cambridge International, Gotham Writers Workshop, BBC Bitesize and two practitioner guides.
+
+### Added
+- **[Article Writing Guide](docs/docs/developer/article-writing-guide.mdx)** — the long-form standard behind `ARTICLE_CRAFT_PROMPT`, with the reasoning and sources for each rule.
+- `BLOG_REPO_PATH` (default `../thiagocolen.github.io`), pointing at the checkout whose MCP server publishes articles.
+- Agent Flow now documents **how an article gets written** and **where to add more detailed article instructions**.
+
+### Removed
+- `src/utils/blog-repo.ts` and the clone → commit → push → `gh pr create` publishing path it implemented, along with `BLOG_REPO_URL` and `BLOG_BASE_BRANCH`.
+
 ## [0.3.0] - 2026-07-17
 
 ### Added

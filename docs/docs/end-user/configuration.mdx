@@ -35,39 +35,44 @@ configured, for every entrypoint (`index.ts`, `cli.ts`, `server.ts`, `mcp.ts`).
 | `LANGCHAIN_TRACING_V2` / `LANGSMITH_TRACING` | `false` | Enables LangSmith tracing. |
 | `LANGCHAIN_API_KEY` / `LANGSMITH_API_KEY` | unset | Required for LangSmith tracing to actually send traces. |
 | `LANGCHAIN_PROJECT` / `LANGSMITH_PROJECT` | `pinky-and-the-brain-agents` | LangSmith project name. |
-| `BLOG_REPO_URL` | `https://github.com/thiagocolen/thiagocolen.github.io.git` | Blog repository that finished articles are published to, as pull requests. |
-| `BLOG_BASE_BRANCH` | `release/v1.2.0` | Branch those pull requests target. Deliberately not the repo default — see below. |
+| `BLOG_REPO_PATH` | `../thiagocolen.github.io` | Checkout of the blog whose `articles` MCP server publishes finished articles. |
 | `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) | unset | Enables cover-image generation. Without it articles still publish, just without an image. |
 | `GEMINI_IMAGE_MODEL` | `gemini-3.1-flash-lite-image` | Model used for cover images. |
 
 ## Publishing articles to the blog
 
-The blog is a **separate repository**. When Pinky asks The Brain to publish a finished
-article, the agent does not write into a checkout on this machine — it clones the blog into
-a temp directory, commits the post on a branch named `articles/<slug>`, pushes, and opens a
-pull request.
+The blog is a **separate repository**, and it owns its own publishing tools. When Pinky asks
+The Brain to publish a finished article, the agent does not write posts itself — it drives
+the `articles` MCP server that ships inside the blog at `mcp-server/index.js`, calling
+`create_draft` → `add_asset` → `update_post` → `stage_changes`.
 
-Two consequences worth knowing:
+This matters because it removes a whole class of drift. The blog's frontmatter shape, its
+slug rules, where images live and which branch is safe to push are now defined in exactly
+one place — `develop-tools/posts.js`, the same module the site's own npm scripts use — and
+this agent is a client of it rather than a second opinion about it.
 
-- **Pushing uses the `gh` CLI's existing credentials.** No token belongs in `.env`, and none
-  is ever interpolated into a remote URL. Run `gh auth status` to check what account will
-  author the commits.
-- **Nothing is ever published live.** Posts are committed with `status: unpublished`, and
-  `gatsby build` only includes published posts — so the article stays invisible on the site
-  even after the pull request merges. Promoting it is a separate, human step on the blog
-  (`npm run publish-post -- <slug>`).
+### Prerequisites
 
-:::note Why `release/v1.2.0` and not `master`
-The blog's default branch is still `master`, which carries the retired SQLite content
-pipeline and has no `content/posts/` directory — an `.mdx` file merged there would never
-render. The MDX pipeline lives on `release/v1.2.0`. Note also the similarly named
-`release-v120` (no slashes) is the *old* branch; they are not the same.
-:::
+`BLOG_REPO_PATH` must point at a checkout that:
 
-Cover images are generated with `gemini-3.1-flash-lite-image` and committed to
-`static/images/posts/<slug>.png` in the blog repo, which Gatsby serves at
-`/images/posts/<slug>.png`. This is the only place a non-Anthropic model is used; all text
-generation remains Anthropic-only.
+- is on a branch containing `mcp-server/` (it arrives with `feature/mcp-publisher-tool`), and
+- has had `npm install` run inside `mcp-server/` once.
+
+If either is missing, publishing fails with a message naming the exact path it looked for.
+
+### What publishing does and does not do
+
+- **The server writes to its own git worktree**, `.mcp-worktree/`, checked out to
+  `new-articles`. You can be mid-edit on any branch of the blog without colliding with it.
+- **Pushing uses that checkout's own git credentials.** No token belongs in `.env`.
+- **Nothing is ever published live.** Two independent gates stand between an article and the
+  public site, and the agent passes neither on its own: the post's `status` flag (the agent
+  never calls `publish_post`, so drafts stay `unpublished`) and the pull request itself. No
+  workflow builds `new-articles`, so pushing there cannot reach the web.
+
+Cover images are generated with `gemini-3.1-flash-lite-image` and added through `add_asset`,
+which returns the `/images/…` URL that goes into the post's `cover_image`. This is the only
+place a non-Anthropic model is used; all text generation remains Anthropic-only.
 
 ## AWS credentials and the S3 fallback
 
