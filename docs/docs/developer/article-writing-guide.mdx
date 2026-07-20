@@ -125,7 +125,70 @@ see where support lies on each side. For a balanced article this is the core
 move: present the perspectives, mark them as perspectives, then leave the reader
 equipped to judge.
 
-## 6. Revise — as a separate act
+## 6. Layout — how the article sits on the page
+
+Unlike the rest of this guide, this section is not distilled from the five
+sources. It is a house convention: the shape the blog at
+[thiagocolen.github.io](https://thiagocolen.github.io) can render, and therefore
+the shape The Brain writes to.
+
+The rule behind it is that **an article is laid out in the file it is written
+in**, not decorated afterwards at publication. Pinky reviews the article before
+it is published, and what they review should be the real shape of the post — not
+prose plus a promise about how it will look.
+
+Three marks do the work. All three are ordinary markdown to read, and are
+translated into the blog's MDX by `src/agents/layout.ts`.
+
+````markdown
+# Lenia
+
+### Or: how I learned to love the blob
+
+Cellular automata have a well-worn origin story...
+
+:::tip Why this matters
+Emergence is easier to watch than it is to define.
+:::
+
+![A Lenia orbium glider drifting across the grid](image: concentric rings dissolving into soft blobs)
+````
+
+**The deck** — an `###` line immediately under the title, and nowhere else. It
+becomes the post's `headline`, rendered under the `<h1>`. Because the title is
+capped at about six words (it becomes the URL), the deck is where a longer or
+wittier phrase goes. One line. It is not a summary and not the opening sentence
+rewritten; it earns the reader's next thirty seconds.
+
+Note the distinction the blog draws, and that an authoring agent will otherwise
+conflate: the **deck** appears on the post page, while the **description** is the
+blurb on the article card in the listing and appears nowhere on the page itself.
+
+**Callouts** — `:::note`, `:::tip` or `:::warn`, closed with `:::`, with an
+optional title after the type. They become `<Callout>` on the blog, which
+degrades an unrecognised type to `note` rather than failing. A callout carries
+something worth saying that would derail the paragraph beside it — a caveat, an
+aside, a warning — and must never restate what the prose already says. One or two
+per article; five means the structure is wrong.
+
+**Figures** — `![alt text](image: what the picture should show)`. The alt text
+becomes the visible caption, so it is written for a reader. The part after
+`image:` is never displayed: it is an instruction to an illustrator, and at
+publication it is what the image model is asked for. Two to four per article,
+spaced through it, only where a picture does work that words would do clumsily.
+
+Figure images are generated at publication, not at writing time, and their URLs
+depend on the slug the blog derives from the title — so the body is drafted with
+inert HTML-comment markers and patched once the images exist. A figure whose
+image cannot be generated has its marker dropped: the article is worth more than
+the picture, and generation failures are soft everywhere in this pipeline.
+
+Because the illustrations are abstract line art, a figure prompt should ask for a
+*concept* — shapes, structure, motion — and never for a labelled diagram or
+anything containing text. Image models render lettering eagerly and get it subtly
+wrong, and a misspelled word in a picture is worse than no picture.
+
+## 7. Revise — as a separate act
 
 Nair and Hughes both separate drafting from editing rather than interleaving
 them.
@@ -141,7 +204,7 @@ obstacle is rarely "how do I start" — it is self-doubt, fear of ridicule and
 impostor syndrome. His answer is that the only way past them is to start, and
 that a process to follow is what keeps you from getting lost.
 
-## 7. The checklist
+## 8. The checklist
 
 Before an article is finished:
 
@@ -150,8 +213,11 @@ Before an article is finished:
 - [ ] The purpose — inform, persuade, entertain, reflect — is decided and consistent.
 - [ ] A reader can tell within a paragraph why they should care.
 - [ ] There is an introduction that engages, a developed middle, and an end that resolves.
-- [ ] The headline says what the piece is about and earns attention.
+- [ ] The title is short enough to be a URL, and the deck carries the longer phrasing.
+- [ ] The deck says what the piece is about and earns attention.
 - [ ] Subheadings break up the text — enough to navigate by, not so many they fragment it.
+- [ ] Every callout carries an aside the prose could not, rather than repeating it.
+- [ ] Every figure does work words would do clumsily; the decorative ones are cut.
 - [ ] Each paragraph carries one idea, and links to its neighbours are explicit.
 - [ ] Sentence structure and vocabulary vary.
 - [ ] Claims are supported by fact, example, statistic or quotation.

@@ -4,10 +4,21 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
-import { marked } from "marked";
-import { generateCoverImage } from "../utils/image-gen.js";
+import { generateBodyImage, generateCoverImage, type GeneratedImage } from "../utils/image-gen.js";
 import { BLOG_BRANCH, parseJsonResult, withBlogSession } from "../utils/blog-mcp.js";
 import { logger } from "../utils/logger.js";
+import {
+  extractFigures,
+  renderBody,
+  splitHeadline,
+  substituteFigures,
+  type Figure,
+} from "./layout.js";
+
+// Layout is `layout.ts`'s business, but `escapeForMdx` was part of this
+// module's surface before that file existed; re-exported so callers and tests
+// need not care which side of the split it landed on.
+export { escapeForMdx, splitHeadline, extractFigures, renderBody, type Figure } from "./layout.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -207,49 +218,49 @@ export function splitTitle(markdown: string): { title: string; body: string } {
   };
 }
 
-/**
- * Escapes the two characters MDX treats as syntax.
- *
- * Post bodies are HTML inside a `.mdx` file, and MDX reads a bare `{` as the
- * start of a JSX expression and a stray `<` as the start of a tag. Either one
- * fails the Gatsby build for the whole site, not just this post — so a code
- * sample containing `{ }` or `a < b` has to be neutralised. HTML entities render
- * identically and are inert to the MDX parser.
- *
- * Only text *outside* tags is touched; the tags `marked` emitted must survive.
- */
-export function escapeForMdx(html: string): string {
-  return html
-    .split(/(<[^>]*>)/)
-    .map((chunk, index) => (index % 2 === 1 ? chunk : chunk.replace(/[{}]/g, (c) => (c === "{" ? "&#123;" : "&#125;"))))
-    .join("");
-}
-
 export interface PreparedPost {
   title: string;
-  /** MDX body: the article minus its H1, as MDX-safe HTML. */
+  /** Deck lifted from the article's own `###` line, if it has one. */
+  headline?: string;
+  /** MDX body: the article minus its title and deck, as MDX-safe HTML. */
   body: string;
+  /** Figures awaiting generation; their markers sit inside `body`. */
+  figures: Figure[];
 }
 
 /**
  * Turns a finished article into what `create_draft` wants.
  *
- * Only the title and the body: status, `published_at`, the slug and the rest of
- * the frontmatter are the blog server's to write, and are no longer duplicated
- * here.
+ * The article carries its own layout, so this is where that layout is read out
+ * of it: the H1 becomes the title, a leading `###` becomes the deck, `:::`
+ * blocks become callouts and image marks become figure placeholders. Status,
+ * `published_at`, the slug and the rest of the frontmatter remain the blog
+ * server's to write.
  */
 export function preparePost(
   markdown: string,
-  options: { title?: string } = {},
+  options: { title?: string; headline?: string } = {},
 ): PreparedPost {
   const split = splitTitle(markdown);
   const title = (options.title ?? split.title).trim();
   if (!title) {
     throw new Error("Cannot derive a post title: pass one, or start the article with '# Title'.");
   }
-  // Keep the H1 only when the caller overrode the title, so no heading is lost.
-  const source = options.title && split.title ? markdown.trim() : split.body;
-  return { title, body: escapeForMdx(marked.parse(source, { async: false }) as string) };
+  // The deck is read from below the H1 either way. Only then is the original
+  // H1 put back, and only when the caller overrode the title, so that no
+  // heading is lost — lifting the deck must not depend on that override.
+  const deck = splitHeadline(split.body);
+  const source =
+    options.title && split.title ? `# ${split.title}\n\n${deck.body}` : deck.body;
+  const extracted = extractFigures(source);
+
+  return {
+    title,
+    // An explicit argument wins over the authored deck, as it does for the title.
+    headline: options.headline?.trim() || deck.headline || undefined,
+    body: renderBody(extracted.markdown),
+    figures: extracted.figures,
+  };
 }
 
 export interface PublishOptions {
@@ -265,9 +276,14 @@ export interface PublishOptions {
  * Publishes a finished article through the blog's own MCP server.
  *
  * The sequence mirrors the flow that server documents: create the draft, learn
- * the slug it chose, attach a cover image if one could be generated, then stage
- * everything for review. Cover-image failure is soft, as before — it costs the
- * picture, not the article.
+ * the slug it chose, attach the images, then stage everything for review. Image
+ * failure is soft throughout — it costs a picture, never the article.
+ *
+ * Images are uploaded *after* the draft exists because their filenames, and so
+ * their URLs, are derived from the slug the blog chose. The body therefore goes
+ * up once with inert markers where its figures belong, and is patched once by
+ * the same `update_post` call that sets the cover — one round trip, not one per
+ * figure.
  *
  * The staging result is relayed **verbatim** rather than parsed and reworded.
  * That server owns what staging produces (today a compare URL, a pull request
@@ -285,13 +301,19 @@ export async function publishToBlog(
     return `Could not prepare the post: ${e.message}`;
   }
 
-  const image = await generateCoverImage(post.title, options.description);
+  // Every generation is independent and each absorbs its own failures, so they
+  // run together rather than serially: a publish with four figures should not
+  // cost four round trips of latency.
+  const [cover, figureImages] = await Promise.all([
+    generateCoverImage(post.title, options.description),
+    Promise.all(post.figures.map((figure) => generateBodyImage(figure.prompt, figure.alt))),
+  ]);
 
   try {
     return await withBlogSession(async (call) => {
       const created = await call("create_draft", {
         title: post.title,
-        headline: options.headline,
+        headline: post.headline,
         description: options.description,
         tags: options.tags,
         body: post.body,
@@ -302,21 +324,44 @@ export async function publishToBlog(
         throw new Error(`The blog created the draft but did not report a slug: ${created}`);
       }
 
-      let coverNote = " (no cover image — generation was unavailable)";
-      if (image) {
-        // Asset first, then patch the frontmatter: `create_draft` cannot know
-        // the image URL because the URL depends on the slug it is choosing.
+      /** Uploads one image and returns the URL the blog will serve it from. */
+      const upload = async (image: GeneratedImage, filename: string): Promise<string | undefined> => {
         const asset = await call("add_asset", {
-          filename: `${slug}.${image.extension}`,
+          filename: `${filename}.${image.extension}`,
           content: image.bytes.toString("base64"),
           overwrite: true,
         });
-        const url = parseJsonResult<{ url: string }>(asset)?.url;
-        if (url) {
-          await call("update_post", { slug, cover_image: url });
-          coverNote = ", plus a generated cover image";
-        }
+        return parseJsonResult<{ url: string }>(asset)?.url;
+      };
+
+      const coverUrl = cover ? await upload(cover, slug) : undefined;
+
+      const figureUrls = new Map<number, string>();
+      for (const figure of post.figures) {
+        const image = figureImages[figure.index];
+        if (!image) continue;
+        const url = await upload(image, `${slug}-fig-${figure.index + 1}`);
+        if (url) figureUrls.set(figure.index, url);
       }
+
+      // One patch for both, and only when there is something to patch: with no
+      // images at all the draft as created is already correct, markers and all
+      // — they are HTML comments, invisible either way.
+      if (coverUrl || figureUrls.size > 0) {
+        await call("update_post", {
+          slug,
+          ...(coverUrl ? { cover_image: coverUrl } : {}),
+          body: substituteFigures(post.body, post.figures, figureUrls),
+        });
+      }
+
+      const coverNote = coverUrl
+        ? ", plus a generated cover image"
+        : " (no cover image — generation was unavailable)";
+      const figureNote =
+        post.figures.length === 0
+          ? ""
+          : ` It carries ${figureUrls.size} of ${post.figures.length} generated figure(s).`;
 
       const staged = await call("stage_changes", {
         message: `content: add "${post.title}" as a draft`,
@@ -325,7 +370,7 @@ export async function publishToBlog(
       logger.info(`[Tools] Staged "${post.title}" (${slug}) on ${BLOG_BRANCH}`);
       return (
         `Published "${post.title}" to thiagocolen.github.io as content/posts/${slug}.mdx ` +
-        `with status "unpublished"${coverNote}.\n\n${staged}\n\n` +
+        `with status "unpublished"${coverNote}.${figureNote}\n\n${staged}\n\n` +
         `The article is NOT live: it is a draft on the "${BLOG_BRANCH}" branch awaiting ` +
         `review, and even once its pull request merges it stays invisible on the site ` +
         `until it is promoted there by hand.`
@@ -497,7 +542,7 @@ const publishArticle = tool(
   {
     name: "publish_article",
     description:
-      "Publish a saved article to the thiagocolen.github.io blog, using the blog's own publishing tools: it generates a cover image, creates the post as a DRAFT (status 'unpublished'), attaches the image, and stages everything on the 'new-articles' branch for review. Returns what the blog reported, including the review URL — always relay that back to Pinky in full. The post is not live, and merging its pull request still does not publish it. Only call this after Pinky explicitly asks to publish.",
+      "Publish a saved article to the thiagocolen.github.io blog, using the blog's own publishing tools: it renders the article's layout (its deck, its ':::' callouts and its figures), generates a cover image and one image per figure, creates the post as a DRAFT (status 'unpublished'), attaches the images, and stages everything on the 'new-articles' branch for review. Returns what the blog reported, including the review URL — always relay that back to Pinky in full. The post is not live, and merging its pull request still does not publish it. Only call this after Pinky explicitly asks to publish.",
     schema: z.object({
       filename: z.string().describe("Filename of the saved article, e.g. 'game-of-life.md'."),
       title: z
@@ -510,7 +555,7 @@ const publishArticle = tool(
         .string()
         .optional()
         .describe(
-          "The deck: a subtitle rendered under the title on the post page. This is where a long or playful phrase belongs, since it never reaches the slug.",
+          "Overrides the deck the article already carries as its '###' line. Normally omit this — the deck belongs in the article file, where Pinky can read it before publishing.",
         ),
       description: z
         .string()
