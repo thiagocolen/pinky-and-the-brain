@@ -26,6 +26,7 @@ configured, for every entrypoint (`index.ts`, `cli.ts`, `server.ts`, `mcp.ts`).
 | Variable | Default | Description |
 | --- | --- | --- |
 | `ANTHROPIC_MODEL` | `claude-sonnet-5` | Claude model name used by the agent. |
+| `ANTHROPIC_MAX_TOKENS` | `16000` | Output tokens per reply. Must be stated: the client derives its own default from a table of model-name prefixes that `claude-sonnet-5` is not in, and falls through to 4096. Raising it far past the default does not work either — the Anthropic SDK refuses a non-streaming request estimated to run over ten minutes, which caps this around 21333. |
 | `NODE_ENV` | `development` | Runtime environment name. |
 | `SQLITE_DB_PATH` | `state.db` | Path to the local SQLite checkpoint database (relative paths are resolved against the project root). |
 | `PORT` | `8080` | Port used by the Express REST/SSE server. |
@@ -37,7 +38,8 @@ configured, for every entrypoint (`index.ts`, `cli.ts`, `server.ts`, `mcp.ts`).
 | `LANGCHAIN_PROJECT` / `LANGSMITH_PROJECT` | `pinky-and-the-brain-agents` | LangSmith project name. |
 | `BLOG_REPO_PATH` | `../thiagocolen.github.io` | Checkout of the blog whose `articles` MCP server publishes finished articles. |
 | `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) | unset | Enables cover-image generation. Without it articles still publish, just without an image. |
-| `GEMINI_IMAGE_MODEL` | `gemini-3.1-flash-lite-image` | Model used for cover images. |
+| `GEMINI_IMAGE_MODEL` | `gemini-3.1-flash-lite-image` | Model used for cover images and article figures. |
+| `GEMINI_IMAGE_SIZE` | `1K` | Pixel tier requested for every generated image. Which tiers a model serves varies — the default one accepts `1K` and refuses both `512` and `2K` — and a refused size is retried once at `1K`, so a wrong value costs latency rather than pictures. |
 
 ## Publishing articles to the blog
 

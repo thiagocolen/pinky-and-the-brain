@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { config } from "../config.js";
 import { logger } from "./logger.js";
+import { IllustrationStyle, styleFor } from "./illustration-styles.js";
 
 /**
  * Cover-image generation for published articles.
@@ -15,22 +16,50 @@ import { logger } from "./logger.js";
  * losing the article because of it would not be.
  */
 
-/** Style keywords for every cover: abstract artwork, never a photograph. */
-const STYLE_KEYWORDS = "abstract geometric line drawing, flat vector art, bold shapes, limited palette";
+/**
+ * Told to every image, whatever it depicts.
+ *
+ * Image models default to composing *within* the frame — a centred subject with
+ * air around it, often on an implied page. That reads as clip-art dropped into
+ * a layout. Asking for the artwork to run past all four edges makes the frame a
+ * crop of something larger, which is both what the blog does to these images and
+ * what makes them look like they belong to the page rather than sitting on it.
+ */
+const COMPOSITION_KEYWORDS =
+  "Full-bleed composition: the artwork fills the entire frame edge to edge and continues " +
+  "past all four edges, cropped by the frame. No border, no margin, no framing, no empty " +
+  "background around the artwork, nothing floating on a blank page.";
 
 /**
- * Aspect ratio matching where covers are actually displayed — a short banner on
- * the post page and a wide card thumbnail in the listing, both cropped via CSS
- * `background-size: cover`.
+ * Covers are square, figures are wide, and that is the whole of the size story.
+ *
+ * The blog crops the cover with CSS to whatever slot it lands in — a banner on
+ * the post page, a card in the listing — so a square carries the most usable
+ * material into every one of them, and the full-bleed instruction above is what
+ * makes surviving that crop the normal case rather than a lucky one. A figure is
+ * punctuation inside a column of prose, not a second cover: 16:9 makes it a band
+ * a reader takes in without losing the paragraph.
+ *
+ * The ratio is also what makes a cover *bigger* than a figure. `imageSize` is a
+ * single request-wide tier (`config.geminiImageSize`) rather than one value per
+ * kind, because a model serves the tiers it serves: the default image model
+ * answers 400 for both `512` and `2K`, so asking for a large cover and a small
+ * figure buys two failed round trips and one identical pair of images. At one
+ * tier a 1:1 frame simply holds more pixels than a 16:9 one.
  */
-const COVER_ASPECT_RATIO = "16:9";
+const COVER_ASPECT_RATIO = "1:1";
+const BODY_ASPECT_RATIO = "16:9";
 
 /**
- * Body figures sit inline in a column of prose, uncropped, so they are shaped
- * to be looked at rather than to survive a crop. Squarer than a cover: a 16:9
- * figure mid-article reads as a divider more than as an illustration.
+ * The size to fall back on when the configured one is refused.
+ *
+ * `1K` is the tier every image model documents. Since every failure in this
+ * module is soft, a size the model does not serve would not raise anything — it
+ * would quietly cost every figure of every article — so a failed request is
+ * retried once here before the picture is given up on. That is not hypothetical:
+ * it is what kept articles illustrated while `GEMINI_IMAGE_SIZE` was wrong.
  */
-const BODY_ASPECT_RATIO = "4:3";
+const FALLBACK_IMAGE_SIZE = "1K";
 
 export interface GeneratedImage {
   bytes: Buffer;
@@ -40,19 +69,28 @@ export interface GeneratedImage {
 }
 
 /**
- * Builds the prompt.
+ * Builds the cover prompt.
  *
  * The "no text" instruction is not decoration: image models render lettering
  * eagerly and get it subtly wrong, and a cover with a misspelled word on it
  * looks far worse than a cover with no word at all.
+ *
+ * `style` defaults to the article's own so that a caller with nothing but a
+ * title still gets the right look; `publishToBlog` passes it explicitly,
+ * because the cover and the figures must be handed the *same* style and only
+ * the caller knows they belong to one article.
  */
-export function buildImagePrompt(title: string, description?: string): string {
+export function buildImagePrompt(
+  title: string,
+  description?: string,
+  style: IllustrationStyle = styleFor(title),
+): string {
   const subject = [title, description].filter(Boolean).join(". ");
   return (
     `Cover illustration for a technical article about: ${subject}. ` +
-    `Style: ${STYLE_KEYWORDS}. ` +
+    `Style: ${style.prompt} ` +
     `Absolutely no text, no words, no letters, no numbers, no captions, no watermarks. ` +
-    `Composition should read clearly when cropped to a wide banner.`
+    `${COMPOSITION_KEYWORDS}`
   );
 }
 
@@ -65,14 +103,19 @@ export function buildImagePrompt(title: string, description?: string): string {
  * keywords follow — a figure that does not match its caption is worse than no
  * figure. The no-text clause is repeated verbatim; it is load-bearing for
  * exactly the same reason it is on the cover.
+ *
+ * `style` has no default here, unlike on the cover. A figure has no identity of
+ * its own to derive one from: it must be drawn in the style of the article it
+ * sits in, and requiring the caller to supply it is what makes that impossible
+ * to forget.
  */
-export function buildFigurePrompt(prompt: string, alt?: string): string {
+export function buildFigurePrompt(prompt: string, style: IllustrationStyle, alt?: string): string {
   const subject = [prompt, alt].filter(Boolean).join(". ");
   return (
     `Illustration accompanying a passage of a technical article, depicting: ${subject}. ` +
-    `Style: ${STYLE_KEYWORDS}. ` +
+    `Style: ${style.prompt} ` +
     `Absolutely no text, no words, no letters, no numbers, no captions, no watermarks. ` +
-    `Composition should read clearly at the width of a column of body text.`
+    `${COMPOSITION_KEYWORDS}`
   );
 }
 
@@ -83,10 +126,19 @@ export function extensionFor(mimeType: string): string {
   return "png";
 }
 
-/** Test seam: the model call, so tests never reach the network. */
-export type ImageGenerator = (prompt: string, aspectRatio: string) => Promise<GeneratedImage | null>;
+/** The geometry of one request: both are parameters, never prose in the prompt. */
+export interface ImageGeometry {
+  aspectRatio: string;
+  imageSize: string;
+}
 
-const defaultGenerator: ImageGenerator = async (prompt, aspectRatio) => {
+/** Test seam: the model call, so tests never reach the network. */
+export type ImageGenerator = (
+  prompt: string,
+  geometry: ImageGeometry,
+) => Promise<GeneratedImage | null>;
+
+const defaultGenerator: ImageGenerator = async (prompt, { aspectRatio, imageSize }) => {
   const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
   const response = await ai.models.generateContent({
@@ -94,7 +146,7 @@ const defaultGenerator: ImageGenerator = async (prompt, aspectRatio) => {
     contents: prompt,
     config: {
       responseModalities: ["IMAGE"],
-      imageConfig: { aspectRatio },
+      imageConfig: { aspectRatio, imageSize },
     },
   });
 
@@ -133,7 +185,7 @@ export function __resetImageGenerator(): void {
  */
 async function generateImage(
   prompt: string,
-  aspectRatio: string,
+  geometry: ImageGeometry,
   label: string,
 ): Promise<GeneratedImage | null> {
   if (!config.geminiApiKey) {
@@ -141,20 +193,36 @@ async function generateImage(
     return null;
   }
 
-  try {
-    const image = await generate(prompt, aspectRatio);
-    if (!image) {
-      logger.warn(`[ImageGen] ${config.geminiImageModel} returned no image for ${label}.`);
+  const attempt = async (size: string): Promise<GeneratedImage | null> => {
+    try {
+      const image = await generate(prompt, { ...geometry, imageSize: size });
+      if (!image) {
+        logger.warn(
+          `[ImageGen] ${config.geminiImageModel} returned no image for ${label} at ${size}.`,
+        );
+        return null;
+      }
+      logger.info(
+        `[ImageGen] Generated a ${image.mimeType} image for ${label} ` +
+          `(${geometry.aspectRatio}, ${size}, ${image.bytes.length} bytes)`,
+      );
+      return image;
+    } catch (e: any) {
+      logger.error(`[ImageGen] Generation failed for ${label} at ${size}: ${e?.message ?? e}`);
       return null;
     }
-    logger.info(
-      `[ImageGen] Generated a ${image.mimeType} image for ${label} (${image.bytes.length} bytes)`,
-    );
-    return image;
-  } catch (e: any) {
-    logger.error(`[ImageGen] Generation failed for ${label}: ${e?.message ?? e}`);
-    return null;
-  }
+  };
+
+  const image = await attempt(geometry.imageSize);
+  if (image || geometry.imageSize === FALLBACK_IMAGE_SIZE) return image;
+
+  // The requested size may simply not be one this model serves, and every
+  // failure here is soft — so rather than let an unsupported size cost the
+  // picture silently, ask once more for the size the API always documents.
+  logger.warn(
+    `[ImageGen] Retrying ${label} at ${FALLBACK_IMAGE_SIZE} after ${geometry.imageSize} produced nothing.`,
+  );
+  return attempt(FALLBACK_IMAGE_SIZE);
 }
 
 /**
@@ -166,11 +234,12 @@ async function generateImage(
 export async function generateCoverImage(
   title: string,
   description?: string,
+  style: IllustrationStyle = styleFor(title),
 ): Promise<GeneratedImage | null> {
   return generateImage(
-    buildImagePrompt(title, description),
-    COVER_ASPECT_RATIO,
-    `the cover of "${title}"`,
+    buildImagePrompt(title, description, style),
+    { aspectRatio: COVER_ASPECT_RATIO, imageSize: config.geminiImageSize },
+    `the cover of "${title}" (${style.id})`,
   );
 }
 
@@ -183,11 +252,12 @@ export async function generateCoverImage(
  */
 export async function generateBodyImage(
   prompt: string,
+  style: IllustrationStyle,
   alt?: string,
 ): Promise<GeneratedImage | null> {
   return generateImage(
-    buildFigurePrompt(prompt, alt),
-    BODY_ASPECT_RATIO,
-    `the figure "${alt || prompt}"`,
+    buildFigurePrompt(prompt, style, alt),
+    { aspectRatio: BODY_ASPECT_RATIO, imageSize: config.geminiImageSize },
+    `the figure "${alt || prompt}" (${style.id})`,
   );
 }

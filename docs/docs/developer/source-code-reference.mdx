@@ -139,6 +139,33 @@ rather than rejects on it — without that, failure text would be parsed as succ
 `__setBlogSession` / `__resetBlogSession` are the test seam: they replace the whole
 session, so tests never spawn a process.
 
+### `image-gen.ts`
+
+Cover and figure generation, the one place Google appears in an otherwise
+Anthropic-only agent — Claude does not generate images, and nothing in the reasoning or
+writing path goes through here. `generateCoverImage()` and `generateBodyImage()` build a
+prompt (subject first, then the article's style, then the no-text and full-bleed clauses)
+and request it at a fixed aspect ratio — covers `1:1`, figures `16:9` — and the single
+pixel tier in `GEMINI_IMAGE_SIZE`. A cover ends up larger than a figure because a square
+frame holds more pixels than a wide one, not because it asks for more: which tiers exist
+is a property of the model, and the default one refuses both `512` and `2K`.
+
+Every failure is soft — a missing key, a refusal, a network error and an empty response
+all return `null`, and the article publishes without the picture. Because that hides a
+refused `imageSize` just as thoroughly as a network blip, a failed request is retried
+once at `1K` before it gives up.
+
+`__setImageGenerator` / `__resetImageGenerator` are the test seam, replacing the model
+call so tests never reach the network.
+
+### `illustration-styles.ts`
+
+The ten styles an article can be drawn in, and `styleFor()`, which hashes a title
+(FNV-1a) to exactly one of them. One style per article, shared by its cover and all its
+figures. Deterministic on purpose: republishing an article already under review must not
+redraw it in a different style. Keyed on the title rather than the slug, because the blog
+does not report a slug until the draft exists — by which point the images are generated.
+
 ### `logger.ts`
 
 Centralized logger writing colorized console output plus a plain-text `agent.log` file

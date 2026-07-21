@@ -183,10 +183,17 @@ inert HTML-comment markers and patched once the images exist. A figure whose
 image cannot be generated has its marker dropped: the article is worth more than
 the picture, and generation failures are soft everywhere in this pipeline.
 
-Because the illustrations are abstract line art, a figure prompt should ask for a
+Because the illustrations are abstract patterns, a figure prompt should ask for a
 *concept* — shapes, structure, motion — and never for a labelled diagram or
 anything containing text. Image models render lettering eagerly and get it subtly
 wrong, and a misspelled word in a picture is worse than no picture.
+
+A figure prompt says *what* to show and never *how it should look*. The style is
+not the author's to choose: one is fixed per article at publication and shared by
+the cover and every figure, so the pictures read as one set. Asking for a colour,
+a medium or a technique in a figure prompt only fights that choice. Which style
+an article gets, and where to change the catalogue, is in
+[Agent Flow](./agent-flow#adding-instructions-about-the-illustrations).
 
 ## 7. Revise — as a separate act
 

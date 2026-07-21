@@ -13,6 +13,7 @@ const mockConfig = vi.hoisted(() => ({
   blogRepoPath: "/nonexistent/blog-checkout",
   geminiApiKey: "",
   geminiImageModel: "gemini-3.1-flash-lite-image",
+  geminiImageSize: "1K",
 }));
 
 vi.mock("../../config.js", () => ({
@@ -49,7 +50,9 @@ import {
   generateBodyImage,
   __setImageGenerator,
   __resetImageGenerator,
+  type ImageGeometry,
 } from "../../utils/image-gen.js";
+import { ILLUSTRATION_STYLES, styleFor } from "../../utils/illustration-styles.js";
 import { BRAIN_SYSTEM_PROMPT, ARTICLE_CRAFT_PROMPT } from "../../agents/prompts.js";
 
 describe("splitTitle", () => {
@@ -281,6 +284,7 @@ describe("image generation", () => {
   afterEach(() => {
     __resetImageGenerator();
     mockConfig.geminiApiKey = "";
+    mockConfig.geminiImageSize = "1K";
   });
 
   it("forbids text in the generated image", () => {
@@ -289,12 +293,29 @@ describe("image generation", () => {
     expect(buildImagePrompt("Lenia")).toMatch(/no text/i);
   });
 
-  it("includes the article subject and the requested style", () => {
+  it("includes the article subject and the article's style", () => {
     const prompt = buildImagePrompt("Lenia", "Continuous cellular automata");
     expect(prompt).toContain("Lenia");
     expect(prompt).toContain("Continuous cellular automata");
-    expect(prompt).toMatch(/abstract/i);
-    expect(prompt).toMatch(/geometric/i);
+    expect(prompt).toContain(styleFor("Lenia").prompt);
+  });
+
+  it("draws the cover and every figure of one article in the same style", () => {
+    // The whole point of a per-article style: a figure must never derive its own
+    // look from its own prompt text.
+    const style = styleFor("Lenia");
+    expect(buildImagePrompt("Lenia", undefined, style)).toContain(style.prompt);
+    expect(buildFigurePrompt("concentric rings", style)).toContain(style.prompt);
+  });
+
+  it("asks for artwork that bleeds off every edge", () => {
+    // Image models otherwise centre the subject and leave air around it, which
+    // reads as clip-art dropped onto the page.
+    for (const prompt of [buildImagePrompt("Lenia"), buildFigurePrompt("rings", styleFor("Lenia"))]) {
+      expect(prompt).toMatch(/full-bleed/i);
+      expect(prompt).toMatch(/past all four edges/i);
+      expect(prompt).toMatch(/no border/i);
+    }
   });
 
   it("derives the file extension from the returned MIME type", () => {
@@ -319,29 +340,64 @@ describe("image generation", () => {
   });
 
   it("forbids text in figures too, not only on the cover", () => {
-    expect(buildFigurePrompt("concentric rings")).toMatch(/no text/i);
+    expect(buildFigurePrompt("concentric rings", styleFor("Lenia"))).toMatch(/no text/i);
   });
 
   it("leads a figure prompt with what the author asked for", () => {
     // The author has already named the idea; a figure that does not match its
     // caption is worse than no figure.
-    const prompt = buildFigurePrompt("concentric rings", "A drifting glider");
+    const prompt = buildFigurePrompt("concentric rings", styleFor("Lenia"), "A drifting glider");
     expect(prompt).toContain("concentric rings");
     expect(prompt).toContain("A drifting glider");
-    expect(prompt).toMatch(/abstract/i);
   });
 
-  it("shapes figures for a column of prose, not for a banner crop", () => {
-    const ratios: string[] = [];
+  it("asks for a square cover and a wide figure at the configured size", () => {
+    // A 1:1 frame holds more pixels than a 16:9 one at the same tier, which is
+    // the only way a model that serves a single tier can give a cover more
+    // material than a figure.
+    const geometries: ImageGeometry[] = [];
     mockConfig.geminiApiKey = "test-key";
-    __setImageGenerator(async (_prompt, aspectRatio) => {
-      ratios.push(aspectRatio);
+    __setImageGenerator(async (_prompt, geometry) => {
+      geometries.push(geometry);
       return null;
     });
 
-    return Promise.all([generateCoverImage("Lenia"), generateBodyImage("rings")]).then(() => {
-      expect(ratios).toEqual(["16:9", "4:3"]);
+    // Sequentially, so the assertion reads the two requests rather than however
+    // two concurrent ones happened to interleave.
+    return generateCoverImage("Lenia")
+      .then(() => generateBodyImage("rings", styleFor("Lenia")))
+      .then(() => {
+        expect(geometries).toEqual([
+          { aspectRatio: "1:1", imageSize: "1K" },
+          { aspectRatio: "16:9", imageSize: "1K" },
+        ]);
+      });
+  });
+
+  it("does not retry when the configured size is already the fallback", () => {
+    // The common case: one request per image, not two.
+    let calls = 0;
+    mockConfig.geminiApiKey = "test-key";
+    __setImageGenerator(async () => {
+      calls += 1;
+      return null;
     });
+
+    return generateCoverImage("Lenia").then(() => expect(calls).toBe(1));
+  });
+
+  it("retries at a documented size when the configured one is refused", async () => {
+    // Not hypothetical: the default image model answers 400 for both `512` and
+    // `2K`. Without this retry an unserved size would silently cost every image
+    // of every article, since failure here is soft by design.
+    mockConfig.geminiApiKey = "test-key";
+    mockConfig.geminiImageSize = "2K";
+    __setImageGenerator(async (_prompt, { imageSize }) => {
+      if (imageSize !== "1K") throw new Error("Image size 2K is not supported for this model");
+      return { bytes: Buffer.from("png"), mimeType: "image/png", extension: "png" };
+    });
+
+    expect(await generateBodyImage("rings", styleFor("Lenia"))).not.toBeNull();
   });
 
   it("returns null from a failed figure, so the article still publishes", async () => {
@@ -349,7 +405,35 @@ describe("image generation", () => {
     __setImageGenerator(async () => {
       throw new Error("model unavailable");
     });
-    expect(await generateBodyImage("rings", "A glider")).toBeNull();
+    expect(await generateBodyImage("rings", styleFor("Lenia"), "A glider")).toBeNull();
+  });
+});
+
+describe("illustration styles", () => {
+  it("gives the same article the same style every time it is published", () => {
+    expect(styleFor("Lenia").id).toBe(styleFor("Lenia").id);
+    expect(styleFor("Lenia").id).toBe(styleFor("  lenia  ").id);
+  });
+
+  it("spreads articles across the catalogue rather than clustering them", () => {
+    const titles = [
+      "Lenia",
+      "Conway's Game of Life",
+      "Particle Life",
+      "AWS Shared Responsibility",
+      "Elementary Automata",
+      "IELTS Speaking",
+      "Frontend Interview Roadmap",
+      "S3 Storage Classes",
+    ];
+    const chosen = new Set(titles.map((t) => styleFor(t).id));
+    expect(chosen.size).toBeGreaterThan(1);
+  });
+
+  it("carries no aspect-ratio flags, since the ratio is a request parameter", () => {
+    for (const style of ILLUSTRATION_STYLES) {
+      expect(style.prompt).not.toContain("--ar");
+    }
   });
 });
 
@@ -506,11 +590,11 @@ describe("publishToBlog", () => {
 
   it("drops only the figure that failed, keeping the rest", async () => {
     mockConfig.geminiApiKey = "test-key";
-    let call = 0;
-    __setImageGenerator(async () => {
-      // The cover generates, the first figure fails, the second succeeds.
-      call += 1;
-      if (call === 2) return null;
+    __setImageGenerator(async (prompt) => {
+      // The cover generates, the first figure fails, the second succeeds. Keyed
+      // on the prompt rather than on a call count because a failed request is
+      // retried at a smaller size, and this figure fails at every size.
+      if (prompt.includes("depicting: one")) return null;
       return { bytes: Buffer.from("bytes"), mimeType: "image/png", extension: "png" };
     });
     const session = recordingSession();
@@ -683,8 +767,23 @@ describe("Delivery instructions in the system prompt", () => {
     expect(BRAIN_SYSTEM_PROMPT).toMatch(/Never claim an article is live/i);
   });
 
-  it("requires confirmation before pushing to a public repository", () => {
-    expect(BRAIN_SYSTEM_PROMPT).toMatch(/confirmation before you act/i);
+  it("treats choosing to publish as the confirmation, rather than asking again", () => {
+    // Picking "publish" from the delivery menu is already a deliberate choice;
+    // a second "shall I proceed?" only cost a round trip.
+    expect(BRAIN_SYSTEM_PROMPT).toMatch(/choosing to publish \*\*is\*\* the confirmation/i);
+    expect(BRAIN_SYSTEM_PROMPT).toMatch(/do not ask them to confirm the push/i);
+  });
+
+  it("has The Brain write the listing description and tags itself", () => {
+    expect(BRAIN_SYSTEM_PROMPT).toMatch(/description and a few lowercase tags \*\*yourself\*\*/i);
+    expect(BRAIN_SYSTEM_PROMPT).toMatch(/state the description and tags you chose/i);
+  });
+
+  it("goes from a saved article straight to the delivery menu", () => {
+    // No "anything to change?" pause: the menu itself is the question, and a
+    // change request arrives in place of a destination.
+    expect(BRAIN_SYSTEM_PROMPT).toMatch(/Do not ask whether they want to change anything/i);
+    expect(BRAIN_SYSTEM_PROMPT).toMatch(/go straight on to \*\*Step 4c\*\*/i);
   });
 
   it("makes The Brain relay every URL the publish tool returned", () => {
@@ -743,6 +842,13 @@ describe("The article writing guide in the system prompt", () => {
 
   it("warns that generated illustrations must not contain text", () => {
     expect(ARTICLE_CRAFT_PROMPT).toMatch(/never for anything containing text/i);
+  });
+
+  it("leaves the illustration style to the publisher, not to the author", () => {
+    // A figure prompt naming a colour or a medium fights the style `styleFor`
+    // fixes for the whole article.
+    expect(ARTICLE_CRAFT_PROMPT).toMatch(/never how it should look/i);
+    expect(ARTICLE_CRAFT_PROMPT).toMatch(/the style is fixed per article/i);
   });
 });
 
