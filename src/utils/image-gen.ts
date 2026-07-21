@@ -23,7 +23,14 @@ const STYLE_KEYWORDS = "abstract geometric line drawing, flat vector art, bold s
  * the post page and a wide card thumbnail in the listing, both cropped via CSS
  * `background-size: cover`.
  */
-const ASPECT_RATIO = "16:9";
+const COVER_ASPECT_RATIO = "16:9";
+
+/**
+ * Body figures sit inline in a column of prose, uncropped, so they are shaped
+ * to be looked at rather than to survive a crop. Squarer than a cover: a 16:9
+ * figure mid-article reads as a divider more than as an illustration.
+ */
+const BODY_ASPECT_RATIO = "4:3";
 
 export interface GeneratedImage {
   bytes: Buffer;
@@ -49,6 +56,26 @@ export function buildImagePrompt(title: string, description?: string): string {
   );
 }
 
+/**
+ * Builds the prompt for a figure inside the article.
+ *
+ * Separate from `buildImagePrompt` because the job is different: a cover
+ * illustrates the article, a figure illustrates one idea within it. The author
+ * has already said what that idea is, so their words lead and the style
+ * keywords follow — a figure that does not match its caption is worse than no
+ * figure. The no-text clause is repeated verbatim; it is load-bearing for
+ * exactly the same reason it is on the cover.
+ */
+export function buildFigurePrompt(prompt: string, alt?: string): string {
+  const subject = [prompt, alt].filter(Boolean).join(". ");
+  return (
+    `Illustration accompanying a passage of a technical article, depicting: ${subject}. ` +
+    `Style: ${STYLE_KEYWORDS}. ` +
+    `Absolutely no text, no words, no letters, no numbers, no captions, no watermarks. ` +
+    `Composition should read clearly at the width of a column of body text.`
+  );
+}
+
 /** Maps a returned MIME type to a file extension. */
 export function extensionFor(mimeType: string): string {
   if (/jpe?g/i.test(mimeType)) return "jpg";
@@ -57,9 +84,9 @@ export function extensionFor(mimeType: string): string {
 }
 
 /** Test seam: the model call, so tests never reach the network. */
-export type ImageGenerator = (prompt: string) => Promise<GeneratedImage | null>;
+export type ImageGenerator = (prompt: string, aspectRatio: string) => Promise<GeneratedImage | null>;
 
-const defaultGenerator: ImageGenerator = async (prompt) => {
+const defaultGenerator: ImageGenerator = async (prompt, aspectRatio) => {
   const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
   const response = await ai.models.generateContent({
@@ -67,7 +94,7 @@ const defaultGenerator: ImageGenerator = async (prompt) => {
     contents: prompt,
     config: {
       responseModalities: ["IMAGE"],
-      imageConfig: { aspectRatio: ASPECT_RATIO },
+      imageConfig: { aspectRatio },
     },
   });
 
@@ -97,6 +124,40 @@ export function __resetImageGenerator(): void {
 }
 
 /**
+ * Runs one generation, absorbing every way it can fail.
+ *
+ * Shared by covers and figures so the soft-failure contract is written once: a
+ * missing key, a refusal, a network error and an empty response all return
+ * null, and the caller — always mid-publish — carries on without the picture.
+ * `label` names the image in the log, since a publish may produce several.
+ */
+async function generateImage(
+  prompt: string,
+  aspectRatio: string,
+  label: string,
+): Promise<GeneratedImage | null> {
+  if (!config.geminiApiKey) {
+    logger.info(`[ImageGen] No GEMINI_API_KEY set — publishing without ${label}.`);
+    return null;
+  }
+
+  try {
+    const image = await generate(prompt, aspectRatio);
+    if (!image) {
+      logger.warn(`[ImageGen] ${config.geminiImageModel} returned no image for ${label}.`);
+      return null;
+    }
+    logger.info(
+      `[ImageGen] Generated a ${image.mimeType} image for ${label} (${image.bytes.length} bytes)`,
+    );
+    return image;
+  } catch (e: any) {
+    logger.error(`[ImageGen] Generation failed for ${label}: ${e?.message ?? e}`);
+    return null;
+  }
+}
+
+/**
  * Generates a cover image, or returns null if one cannot be had.
  *
  * Never throws: the caller is mid-publish and an article without a picture is a
@@ -106,23 +167,27 @@ export async function generateCoverImage(
   title: string,
   description?: string,
 ): Promise<GeneratedImage | null> {
-  if (!config.geminiApiKey) {
-    logger.info("[ImageGen] No GEMINI_API_KEY set — publishing without a cover image.");
-    return null;
-  }
+  return generateImage(
+    buildImagePrompt(title, description),
+    COVER_ASPECT_RATIO,
+    `the cover of "${title}"`,
+  );
+}
 
-  try {
-    const image = await generate(buildImagePrompt(title, description));
-    if (!image) {
-      logger.warn(`[ImageGen] ${config.geminiImageModel} returned no image for "${title}".`);
-      return null;
-    }
-    logger.info(
-      `[ImageGen] Generated a ${image.mimeType} cover for "${title}" (${image.bytes.length} bytes)`,
-    );
-    return image;
-  } catch (e: any) {
-    logger.error(`[ImageGen] Cover generation failed for "${title}": ${e?.message ?? e}`);
-    return null;
-  }
+/**
+ * Generates one in-article figure, or returns null if one cannot be had.
+ *
+ * Same contract as the cover: never throws. A figure that fails to generate
+ * simply does not appear — see `substituteFigures` in `src/agents/layout.ts`,
+ * which drops the marker rather than leaving a hole in the page.
+ */
+export async function generateBodyImage(
+  prompt: string,
+  alt?: string,
+): Promise<GeneratedImage | null> {
+  return generateImage(
+    buildFigurePrompt(prompt, alt),
+    BODY_ASPECT_RATIO,
+    `the figure "${alt || prompt}"`,
+  );
 }

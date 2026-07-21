@@ -40,7 +40,7 @@ flowchart TD
     Action -->|Write an article| Instructions["Any instructions<br/>for the article?"]
 
     Instructions --> Compose["retrieve_content<br/>→ compose per the writing guide<br/>honouring instructions"]
-    Compose --> Save["save_article<br/>→ ./articles/*.md"]
+    Compose --> Save["save_article<br/>→ ./articles/*.md<br/>deck, callouts and figures included"]
     Save --> Report["Reports the exact file path<br/>Anything to change?"]
     Report --> WantsChange{Change something?}
     WantsChange -->|Yes| Confirm["Restates the change<br/>asks for confirmation"]
@@ -49,7 +49,7 @@ flowchart TD
     WantsChange -->|No| Deliver{"Where should it go?"}
 
     Deliver -->|Publish to the blog| Ask["Asks for a description<br/>and tags, then confirms"]
-    Ask --> Publish["publish_article<br/>→ the blog's MCP server"]
+    Ask --> Publish["publish_article<br/>→ renders the layout, generates<br/>cover + figures, drafts via the blog's MCP server"]
     Publish --> Relay["Relays the blog's report<br/>in full, URLs included"]
     Relay --> Next
     Deliver -->|Save to a folder| Export["export_article<br/>→ reports the path"]
@@ -87,7 +87,7 @@ The loop never dead-ends: both branches return to *"what next?"*, which returns 
 | `save_article` | Writes markdown to `./articles/` and returns the absolute path. |
 | `update_article` | Overwrites an existing article, after Pinky confirms. |
 | `read_article` | Reads a saved article back before revising it. |
-| `publish_article` | Publishes to the blog through its own `articles` MCP server. |
+| `publish_article` | Renders the article's layout, generates its images, and drafts it on the blog through that site's own `articles` MCP server. |
 | `export_article` | Copies a finished article into a folder Pinky names. |
 
 ## How an article gets written
@@ -112,9 +112,13 @@ For a single article the sequence is:
    audience, purpose and stakes before drafting; three-part structure; one idea per
    paragraph with explicit links; varied sentences; supported claims; a short title.
    Pinky's own instructions outrank the standard where the two disagree.
-4. **Save and iterate.** `save_article` writes `./articles/<slug>.md`; revisions go through
+4. **Lay it out in the file.** The same standard governs the article's shape: an `###` deck
+   under the title, `:::note|tip|warn` callouts, and `![alt](image: prompt)` figures. The
+   layout lives in the markdown so that what Pinky reviews is the real shape of the post,
+   not a description of one.
+5. **Save and iterate.** `save_article` writes `./articles/<slug>.md`; revisions go through
    `update_article`, only after Pinky confirms each change.
-5. **Deliver.** Step 4c offers the blog, a folder, or neither.
+6. **Deliver.** Step 4c offers the blog, a folder, or neither.
 
 Note what is *not* code: nothing enforces the structure, the length or the title cap. They
 are instructions the model follows, which is why the wording is precise and why the

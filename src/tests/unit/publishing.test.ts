@@ -28,6 +28,13 @@ import {
   resolveExportPath,
 } from "../../agents/tools.js";
 import {
+  splitHeadline,
+  extractFigures,
+  renderBody,
+  substituteFigures,
+  escapeAttribute,
+} from "../../agents/layout.js";
+import {
   BLOG_BRANCH,
   parseJsonResult,
   resolveBlogRepoPath,
@@ -36,8 +43,10 @@ import {
 } from "../../utils/blog-mcp.js";
 import {
   buildImagePrompt,
+  buildFigurePrompt,
   extensionFor,
   generateCoverImage,
+  generateBodyImage,
   __setImageGenerator,
   __resetImageGenerator,
 } from "../../utils/image-gen.js";
@@ -72,16 +81,143 @@ describe("escapeForMdx", () => {
   });
 });
 
+describe("splitHeadline", () => {
+  it("lifts a deck sitting directly under the title", () => {
+    const { headline, body } = splitHeadline("### Or: how I learned to love the blob\n\nProse.");
+    expect(headline).toBe("Or: how I learned to love the blob");
+    expect(body).toBe("Prose.");
+  });
+
+  it("leaves an ordinary subheading further down alone", () => {
+    // Only the leading position means "deck". An H3 mid-article is navigation,
+    // and lifting it would silently delete a section heading.
+    const source = "Opening paragraph.\n\n### A real subheading\n\nMore prose.";
+    const { headline, body } = splitHeadline(source);
+    expect(headline).toBe("");
+    expect(body).toBe(source);
+  });
+
+  it("copes with an article that has no deck", () => {
+    expect(splitHeadline("Just prose.").headline).toBe("");
+  });
+});
+
+describe("extractFigures", () => {
+  it("collects the alt text and the generation prompt separately", () => {
+    const { figures } = extractFigures("![A drifting glider](image: concentric rings)");
+    expect(figures).toEqual([{ index: 0, alt: "A drifting glider", prompt: "concentric rings" }]);
+  });
+
+  it("leaves an inert marker rather than visible placeholder text", () => {
+    // Figures are generated after the draft exists, so the marker may survive
+    // to the page if anything fails. An HTML comment renders as nothing.
+    const { markdown } = extractFigures("Before.\n\n![Alt](image: a prompt)\n\nAfter.");
+    expect(markdown).toContain("<!--figure:0-->");
+    expect(markdown).not.toContain("image:");
+    expect(markdown).not.toContain("Alt");
+  });
+
+  it("numbers figures in the order they appear", () => {
+    const { figures } = extractFigures("![One](image: first)\n\n![Two](image: second)");
+    expect(figures.map((f) => f.index)).toEqual([0, 1]);
+    expect(figures.map((f) => f.prompt)).toEqual(["first", "second"]);
+  });
+
+  it("ignores an ordinary image that already has a URL", () => {
+    const source = "![A logo](https://example.com/logo.png)";
+    const { markdown, figures } = extractFigures(source);
+    expect(figures).toEqual([]);
+    expect(markdown).toBe(source);
+  });
+});
+
+describe("substituteFigures", () => {
+  const figures = [
+    { index: 0, alt: "A drifting glider", prompt: "rings" },
+    { index: 1, alt: "A membrane", prompt: "blobs" },
+  ];
+
+  it("renders an uploaded figure with its caption", () => {
+    const html = substituteFigures(
+      "<p>a</p><!--figure:0-->",
+      figures,
+      new Map([[0, "/images/lenia-fig-1.png"]]),
+    );
+    expect(html).toContain('<img src="/images/lenia-fig-1.png" alt="A drifting glider" />');
+    expect(html).toContain("<figcaption>A drifting glider</figcaption>");
+  });
+
+  it("removes the marker of a figure that could not be generated", () => {
+    // The article is worth more than the picture.
+    const html = substituteFigures(
+      "<!--figure:0--><!--figure:1-->",
+      figures,
+      new Map([[1, "/images/lenia-fig-2.png"]]),
+    );
+    expect(html).not.toContain("<!--figure:0-->");
+    expect(html).toContain("lenia-fig-2.png");
+  });
+});
+
+describe("renderBody", () => {
+  it("turns a fenced block into the blog's Callout component", () => {
+    const html = renderBody(":::tip Why this matters\nEmergence is easier to watch.\n:::");
+    expect(html).toContain('<Callout type="tip" title="Why this matters">');
+    expect(html).toContain("</Callout>");
+  });
+
+  it("renders the markdown inside a callout, not just around it", () => {
+    // `marked` does not descend into block HTML, so the callout body has to be
+    // parsed on its own — otherwise its prose ships as unformatted text.
+    const html = renderBody(":::note\nThis is **important**.\n:::");
+    expect(html).toContain("<strong>important</strong>");
+  });
+
+  it("omits the title attribute when the author gave none", () => {
+    const html = renderBody(":::warn\nCareful.\n:::");
+    expect(html).toContain('<Callout type="warn">');
+  });
+
+  it("passes an unrecognised type through for the blog to degrade", () => {
+    // The blog's component falls back to `note`. A second opinion about the
+    // valid set here could only drift away from it.
+    expect(renderBody(":::sidebar\nText.\n:::")).toContain('<Callout type="sidebar">');
+  });
+
+  it("closes a callout the author forgot to close", () => {
+    const html = renderBody("Prose.\n\n:::tip\nUnterminated.");
+    expect(html).toContain("</Callout>");
+    expect(html).not.toContain(":::");
+  });
+
+  it("still escapes braces that would break the site build", () => {
+    const html = renderBody(":::note\nUse `{ a: 1 }` here.\n:::");
+    expect(html).not.toMatch(/[{}]/);
+  });
+
+  it("renders prose surrounding a callout as ordinary markdown", () => {
+    const html = renderBody("Before.\n\n:::tip\nAside.\n:::\n\nAfter.");
+    expect(html).toContain("<p>Before.</p>");
+    expect(html).toContain("<p>After.</p>");
+  });
+});
+
+describe("escapeAttribute", () => {
+  it("neutralises quotes and braces that would break the tag or the build", () => {
+    expect(escapeAttribute('a "quoted" {brace}')).toBe("a &quot;quoted&quot; &#123;brace&#125;");
+  });
+});
+
 describe("preparePost", () => {
   const article = "# Lenia\n\nA continuous cellular automaton.";
 
-  it("sends the title and an MDX body, and nothing else", () => {
-    // Frontmatter, status and the slug are the blog server's to write. A second
-    // opinion about them here is exactly what this change removed.
+  it("sends the article's own content, and nothing else", () => {
+    // Status, `published_at` and the slug are the blog server's to write. A
+    // second opinion about them here is exactly what this change removed.
     const post = preparePost(article);
     expect(post.title).toBe("Lenia");
     expect(post.body).toContain("continuous cellular automaton");
-    expect(Object.keys(post).sort()).toEqual(["body", "title"]);
+    expect(Object.keys(post).sort()).toEqual(["body", "figures", "headline", "title"]);
   });
 
   it("drops the H1 so the site does not render the title twice", () => {
@@ -96,6 +232,37 @@ describe("preparePost", () => {
 
   it("refuses an article with no derivable title", () => {
     expect(() => preparePost("No heading here.")).toThrow(/Cannot derive a post title/);
+  });
+
+  it("lifts the article's own deck into the headline field", () => {
+    // The bug this fixes: the deck shipped as a stray <h3> at the top of the
+    // body while the headline frontmatter stayed empty.
+    const post = preparePost("# Lenia\n\n### Learning to love the blob\n\nProse.");
+    expect(post.headline).toBe("Learning to love the blob");
+    expect(post.body).not.toContain("<h3>");
+  });
+
+  it("lifts the deck even when the caller overrides the title", () => {
+    const post = preparePost("# Lenia\n\n### A deck\n\nProse.", { title: "Another Title" });
+    expect(post.headline).toBe("A deck");
+    expect(post.body).toContain("<h1>Lenia</h1>");
+    expect(post.body).not.toContain("<h3>");
+  });
+
+  it("lets an explicit headline win over the authored deck", () => {
+    const post = preparePost("# Lenia\n\n### Authored deck\n\nProse.", {
+      headline: "Supplied deck",
+    });
+    expect(post.headline).toBe("Supplied deck");
+  });
+
+  it("carries the article's layout into the body", () => {
+    const post = preparePost(
+      "# Lenia\n\nProse.\n\n:::tip Note this\nAn aside.\n:::\n\n![A glider](image: rings)",
+    );
+    expect(post.body).toContain('<Callout type="tip" title="Note this">');
+    expect(post.body).toContain("<!--figure:0-->");
+    expect(post.figures).toHaveLength(1);
   });
 });
 
@@ -149,6 +316,40 @@ describe("image generation", () => {
       throw new Error("model unavailable");
     });
     expect(await generateCoverImage("Lenia")).toBeNull();
+  });
+
+  it("forbids text in figures too, not only on the cover", () => {
+    expect(buildFigurePrompt("concentric rings")).toMatch(/no text/i);
+  });
+
+  it("leads a figure prompt with what the author asked for", () => {
+    // The author has already named the idea; a figure that does not match its
+    // caption is worse than no figure.
+    const prompt = buildFigurePrompt("concentric rings", "A drifting glider");
+    expect(prompt).toContain("concentric rings");
+    expect(prompt).toContain("A drifting glider");
+    expect(prompt).toMatch(/abstract/i);
+  });
+
+  it("shapes figures for a column of prose, not for a banner crop", () => {
+    const ratios: string[] = [];
+    mockConfig.geminiApiKey = "test-key";
+    __setImageGenerator(async (_prompt, aspectRatio) => {
+      ratios.push(aspectRatio);
+      return null;
+    });
+
+    return Promise.all([generateCoverImage("Lenia"), generateBodyImage("rings")]).then(() => {
+      expect(ratios).toEqual(["16:9", "4:3"]);
+    });
+  });
+
+  it("returns null from a failed figure, so the article still publishes", async () => {
+    mockConfig.geminiApiKey = "test-key";
+    __setImageGenerator(async () => {
+      throw new Error("model unavailable");
+    });
+    expect(await generateBodyImage("rings", "A glider")).toBeNull();
   });
 });
 
@@ -272,6 +473,75 @@ describe("publishToBlog", () => {
 
     expect(session.argsFor("add_asset").filename).toBe("lenia.jpg");
     expect(session.argsFor("update_post").cover_image).toBe("/images/lenia.jpg");
+  });
+
+  it("uploads one figure per marker and patches them into the body", async () => {
+    mockConfig.geminiApiKey = "test-key";
+    __setImageGenerator(async () => ({
+      bytes: Buffer.from("fake-png-bytes"),
+      mimeType: "image/png",
+      extension: "png",
+    }));
+    const session = recordingSession();
+    const illustrated =
+      "# Lenia\n\nProse.\n\n![A drifting glider](image: rings)\n\nMore.\n\n![A membrane](image: blobs)";
+    const result = await publishToBlog(illustrated);
+
+    // Cover plus two figures, and a single patch carrying both the cover and
+    // the finished body — not one round trip per image.
+    expect(session.names().filter((n) => n === "add_asset")).toHaveLength(3);
+    expect(session.names().filter((n) => n === "update_post")).toHaveLength(1);
+    expect(session.calls.map((c) => c.args.filename).filter(Boolean)).toEqual([
+      "lenia.png",
+      "lenia-fig-1.png",
+      "lenia-fig-2.png",
+    ]);
+
+    const body = session.argsFor("update_post").body;
+    expect(body).toContain('<img src="/images/lenia-fig-1.png" alt="A drifting glider" />');
+    expect(body).toContain('<img src="/images/lenia-fig-2.png" alt="A membrane" />');
+    expect(body).not.toContain("<!--figure:");
+    expect(result).toMatch(/2 of 2 generated figure/i);
+  });
+
+  it("drops only the figure that failed, keeping the rest", async () => {
+    mockConfig.geminiApiKey = "test-key";
+    let call = 0;
+    __setImageGenerator(async () => {
+      // The cover generates, the first figure fails, the second succeeds.
+      call += 1;
+      if (call === 2) return null;
+      return { bytes: Buffer.from("bytes"), mimeType: "image/png", extension: "png" };
+    });
+    const session = recordingSession();
+    const result = await publishToBlog(
+      "# Lenia\n\n![First](image: one)\n\n![Second](image: two)",
+    );
+
+    const body = session.argsFor("update_post").body;
+    expect(body).not.toContain("<!--figure:");
+    expect(body).not.toContain('alt="First"');
+    expect(body).toContain('alt="Second"');
+    expect(result).toMatch(/1 of 2 generated figure/i);
+  });
+
+  it("leaves the draft untouched when no image of any kind could be made", async () => {
+    // With nothing to patch, the draft as created is already correct — its
+    // markers are HTML comments, invisible on the page either way.
+    mockConfig.geminiApiKey = "test-key";
+    __setImageGenerator(async () => null);
+    const session = recordingSession();
+    const result = await publishToBlog("# Lenia\n\n![A glider](image: rings)");
+
+    expect(session.names()).toEqual(["create_draft", "stage_changes"]);
+    expect(session.argsFor("create_draft").body).toContain("<!--figure:0-->");
+    expect(result).toContain("compare/new-articles");
+  });
+
+  it("sends the article's deck to the blog as the headline", async () => {
+    const session = recordingSession();
+    await publishToBlog("# Lenia\n\n### Learning to love the blob\n\nProse.");
+    expect(session.argsFor("create_draft").headline).toBe("Learning to love the blob");
   });
 
   it("still publishes when image generation fails", async () => {
@@ -447,11 +717,32 @@ describe("The article writing guide in the system prompt", () => {
   it("caps the title length, because the title becomes the URL", () => {
     expect(ARTICLE_CRAFT_PROMPT).toMatch(/six words/i);
     expect(ARTICLE_CRAFT_PROMPT).toMatch(/URL slug/i);
-    expect(ARTICLE_CRAFT_PROMPT).toMatch(/headline/i);
+    expect(ARTICLE_CRAFT_PROMPT).toMatch(/deck/i);
   });
 
   it("tells the agent where the long title belongs instead", () => {
     expect(BRAIN_SYSTEM_PROMPT).toMatch(/at most about six words/i);
+  });
+
+  it("teaches all three layout marks, so an article is not a wall of text", () => {
+    expect(ARTICLE_CRAFT_PROMPT).toMatch(/## Layout/);
+    expect(ARTICLE_CRAFT_PROMPT).toContain(":::tip");
+    expect(ARTICLE_CRAFT_PROMPT).toContain("(image:");
+    expect(ARTICLE_CRAFT_PROMPT).toMatch(/line immediately under the title/i);
+  });
+
+  it("requires the layout to live in the file Pinky reviews", () => {
+    expect(ARTICLE_CRAFT_PROMPT).toMatch(/into the file itself/i);
+    expect(BRAIN_SYSTEM_PROMPT).toMatch(/The layout goes \*\*in the file\*\*/);
+  });
+
+  it("keeps callouts and figures from being mere decoration", () => {
+    expect(ARTICLE_CRAFT_PROMPT).toMatch(/restate what the prose already says/i);
+    expect(ARTICLE_CRAFT_PROMPT).toMatch(/merely decorates should be cut/i);
+  });
+
+  it("warns that generated illustrations must not contain text", () => {
+    expect(ARTICLE_CRAFT_PROMPT).toMatch(/never for anything containing text/i);
   });
 });
 

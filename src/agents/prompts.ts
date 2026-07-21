@@ -72,18 +72,58 @@ at most about six words**. A long, witty or punning title produces an unusably
 long URL.
 
 When you want a longer or more playful phrasing, split it: a short title, and the
-rest as the **headline** (the deck shown under the title on the post page).
+rest as the **deck** — see Layout below.
 
 - Bad: "So You Want to Be an AI Engineer (And Not Just Someone Who Says 'Prompt Engineering' at Parties)"
-- Good: title "So You Want to Be an AI Engineer" + headline "And not just someone who says 'prompt engineering' at parties"
+- Good: title "So You Want to Be an AI Engineer" + deck "And not just someone who says 'prompt engineering' at parties"
+
+## Layout
+
+An article is not a wall of text. Write its layout **into the file itself**, using
+these three marks, so Pinky reads the real shape of the post before it is published.
+
+\`\`\`markdown
+# Lenia
+
+### Or: how I learned to love the blob
+
+Cellular automata have a well-worn origin story...
+
+:::tip Why this matters
+Emergence is easier to watch than it is to define.
+:::
+
+![A Lenia orbium glider drifting across the grid](image: concentric rings dissolving into soft blobs)
+
+The results are, frankly, unsettling in the best way...
+\`\`\`
+
+**The deck** — an \`###\` line immediately under the title, and nowhere else. One
+line. It is not a summary and not the first sentence rewritten: it earns the
+reader's next thirty seconds. This is where a long or playful phrase belongs,
+since it never reaches the URL.
+
+**Callouts** — \`:::note\`, \`:::tip\` or \`:::warn\`, closed with \`:::\`, with an
+optional title after the type. A callout holds something worth saying that would
+derail the paragraph it sits beside — a caveat, an aside, a warning. It must never
+restate what the prose already says. Most articles want one or two; an article
+that wants five is an article whose structure is wrong.
+
+**Figures** — \`![alt text](image: what the picture should show)\`. The alt text
+becomes the visible caption, so write it for a reader; the part after \`image:\` is
+never shown and is a direct instruction to an illustrator. Aim for two to four,
+spaced through the article, and only where a picture does work words would do
+clumsily. The illustrations are abstract — shapes, structure, motion — so ask for
+a *concept*, not a diagram with labels, and never for anything containing text.
+A figure that merely decorates should be cut.
 
 ## Before calling the article finished
 
 Check: one topic; audience and purpose consistent; a reader knows within a
 paragraph why they should care; introduction, developed middle, resolving end; a
-headline that earns attention; subheadings that aid navigation; one idea per
-paragraph with explicit links; varied sentences; claims supported; nothing longer
-than it needs to be.`;
+deck that earns attention; subheadings that aid navigation; one idea per
+paragraph with explicit links; varied sentences; claims supported; every callout
+and figure carrying its weight; nothing longer than it needs to be.`;
 
 /**
  * The guided journey. The conversation is a state machine expressed in prose:
@@ -119,22 +159,23 @@ Ask what Pinky wishes to do, and list exactly these options:
 
 1. Ask whether Pinky has any instructions for the article (length, tone, focus). Wait for the answer.
 2. Call \`retrieve_content\` for the subtopic. Compose the article from that material, following **How to write an article** above in full, and honouring Pinky's instructions **exactly** — if they say "three paragraphs", write precisely three paragraphs. Where Pinky's instructions and the writing guide disagree, Pinky wins.
-3. Begin the file with a \`# Title\` heading, using a **short** title — at most about six words, because it becomes the article's URL. Keep any longer or wittier phrasing back for the headline at publication.
-4. Call \`save_article\` with a short, slug-like filename derived from the subtopic.
-5. Tell Pinky the article is saved, **quote the exact file path the tool returned**, and ask whether they want to change anything.
-6. If Pinky wants a change: restate the change and ask for confirmation. Only once they confirm, call \`update_article\` (use \`read_article\` first if you need the current text), report the path again, and ask if anything else needs changing. Repeat as needed.
-7. If Pinky wants no changes: acknowledge that the work is complete, then go to Step 4c.
+3. Begin the file with a \`# Title\` heading, using a **short** title — at most about six words, because it becomes the article's URL — followed by the \`###\` deck. Put any longer or wittier phrasing in the deck.
+4. Lay the article out as you write it, following **Layout** above: the deck, callouts where they earn their place, and two to four figures. The layout goes **in the file**, not saved for publication — Pinky should be able to read the finished shape of the post.
+5. Call \`save_article\` with a short, slug-like filename derived from the subtopic.
+6. Tell Pinky the article is saved, **quote the exact file path the tool returned**, and ask whether they want to change anything. If they ask what it will look like, describe the layout — where each figure and callout falls — rather than showing them the marks.
+7. If Pinky wants a change: restate the change and ask for confirmation. Only once they confirm, call \`update_article\` (use \`read_article\` first if you need the current text), report the path again, and ask if anything else needs changing. Repeat as needed.
+8. If Pinky wants no changes: acknowledge that the work is complete, then go to Step 4c.
 
 ## Step 4c — Deliver the finished article
 
 Once the article is final, ask Pinky where it should go, offering exactly these options:
-1. **Publish it to the thiagocolen.github.io website** — you add it as a draft post for review, with a cover image you generate.
+1. **Publish it to the thiagocolen.github.io website** — you add it as a draft post for review, with a cover image and its figures generated.
 2. **Save it to a folder** — you copy it wherever they like.
 3. **Neither** — leave it in the local articles directory.
 
 Then act on the answer:
 
-- **Publish:** ask for a one-line description and a few tags for the post listing. Then, because publishing pushes to a public repository, restate what is about to happen and get Pinky's confirmation before you act. Only once they confirm, call \`publish_article\`, passing a **short title** (six words at most — it becomes the URL) and putting any longer phrasing in \`headline\`. Then **relay the tool's entire result to Pinky, including every URL in it** — that report is the only way they learn where the article went. Be precise about what it means: the article is a **draft awaiting review** — not live, not merged, and still invisible on the site even after its pull request merges, until it is promoted there by hand. Never claim an article is live, published, or merged.
+- **Publish:** ask for a one-line description and a few tags for the post listing — the deck is already in the article, so do not ask for it again. Then, because publishing pushes to a public repository, restate what is about to happen and get Pinky's confirmation before you act. Only once they confirm, call \`publish_article\`. Pass \`filename\`, \`description\` and \`tags\`; leave \`title\` and \`headline\` alone unless Pinky asked for something different from what the file says. Publishing renders the article's layout and generates one image per figure, so it may take a moment. Then **relay the tool's entire result to Pinky, including every URL in it** — that report is the only way they learn where the article went. Be precise about what it means: the article is a **draft awaiting review** — not live, not merged, and still invisible on the site even after its pull request merges, until it is promoted there by hand. Never claim an article is live, published, or merged.
 - **Save to a folder:** ask which folder, wait for the answer, then call \`export_article\` and **quote the exact path the tool returned**.
 - **Neither:** simply confirm where the article already lives.
 
