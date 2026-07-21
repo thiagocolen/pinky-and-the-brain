@@ -41,15 +41,13 @@ flowchart TD
 
     Instructions --> Compose["retrieve_content<br/>→ compose per the writing guide<br/>honouring instructions"]
     Compose --> Save["save_article<br/>→ ./articles/*.md<br/>deck, callouts and figures included"]
-    Save --> Report["Reports the exact file path<br/>Anything to change?"]
-    Report --> WantsChange{Change something?}
-    WantsChange -->|Yes| Confirm["Restates the change<br/>asks for confirmation"]
-    Confirm --> Update["update_article<br/>→ reports path again"]
-    Update --> Report
-    WantsChange -->|No| Deliver{"Where should it go?"}
+    Save --> Deliver{"Reports the exact file path<br/>and its layout, then:<br/>where should it go?"}
 
-    Deliver -->|Publish to the blog| Ask["Asks for a description<br/>and tags, then confirms"]
-    Ask --> Publish["publish_article<br/>→ renders the layout, generates<br/>cover + figures, drafts via the blog's MCP server"]
+    Deliver -->|Change something instead| Confirm["Restates the change<br/>asks for confirmation"]
+    Confirm --> Update["update_article<br/>→ reports path again"]
+    Update --> Deliver
+
+    Deliver -->|Publish to the blog| Publish["publish_article<br/>→ writes its own description and tags,<br/>renders the layout, generates<br/>cover + figures, drafts via the blog's MCP server"]
     Publish --> Relay["Relays the blog's report<br/>in full, URLs included"]
     Relay --> Next
     Deliver -->|Save to a folder| Export["export_article<br/>→ reports the path"]
@@ -116,9 +114,14 @@ For a single article the sequence is:
    under the title, `:::note|tip|warn` callouts, and `![alt](image: prompt)` figures. The
    layout lives in the markdown so that what Pinky reviews is the real shape of the post,
    not a description of one.
-5. **Save and iterate.** `save_article` writes `./articles/<slug>.md`; revisions go through
-   `update_article`, only after Pinky confirms each change.
-6. **Deliver.** Step 4c offers the blog, a folder, or neither.
+5. **Save and offer delivery in one breath.** `save_article` writes `./articles/<slug>.md`, and
+   the same turn reports the path, describes the layout, and presents the delivery menu. There
+   is deliberately no "anything to change?" pause: a revision request simply arrives in place of
+   a destination, and revisions still go through `update_article`, only after Pinky confirms the
+   change.
+6. **Deliver.** Step 4c offers the blog, a folder, or neither. Choosing the blog publishes
+   immediately — The Brain writes the listing description and tags itself and reports what it
+   used, rather than asking for them and then asking again whether to push.
 
 Note what is *not* code: nothing enforces the structure, the length or the title cap. They
 are instructions the model follows, which is why the wording is precise and why the
@@ -141,6 +144,35 @@ that refining how articles read never means editing the conversation's state mac
 The long-form version of that standard, with the reasoning and sources behind each rule,
 is the [Article Writing Guide](./article-writing-guide) — **edit both together**, and add a
 test asserting the new rule reaches `BRAIN_SYSTEM_PROMPT` so it cannot be silently dropped.
+
+### Adding instructions about the illustrations
+
+Image guidance has its own four places, and only the first of them is written by the model:
+
+| Where | For | Model-visible? |
+| --- | --- | --- |
+| `ARTICLE_CRAFT_PROMPT` → **Figures** (`src/agents/prompts.ts`) | *What to depict, and when a figure earns its place* — how many, where they sit, concept rather than labelled diagram | Yes — The Brain writes the `image:` prompt |
+| `buildImagePrompt` / `buildFigurePrompt` (`src/utils/image-gen.ts`) | House rules true of every image whatever it shows: the no-text clause, the full-bleed composition clause, the article's style | No — appended after the author's words |
+| `ILLUSTRATION_STYLES` / `styleFor` (`src/utils/illustration-styles.ts`) | The look itself — the catalogue of styles, and the rule that fixes one per article | No |
+| `imageConfig` in the generator (`src/utils/image-gen.ts`) | Geometry: aspect ratio and pixel size | No |
+
+The dividing line is what varies. Anything that differs **per figure** is a prompt rule in
+`prompts.ts`, because only the model knows what a given passage needs a picture of. Anything
+true of **every** image is code in `image-gen.ts`, where it cannot be forgotten — the no-text
+clause is the canonical case, repeated verbatim in both builders rather than trusted to the
+model, because image models render lettering eagerly and get it subtly wrong.
+
+Geometry is the one thing that should never be phrased as prose. `aspectRatio` and
+`imageSize` are parameters on the request and are honoured; a sentence asking for a square
+is a suggestion. Note that a size the API rejects would cost the picture silently — every
+failure in this module is soft — so `generateImage` retries once at `1K` before giving up.
+
+Style is deliberately **not** the model's to choose. `styleFor` hashes the article title to
+one of the ten entries in `ILLUSTRATION_STYLES`, and that single style is handed to the
+cover and to every figure of that article. Deterministic, so republishing an article under
+review does not quietly redraw it; per-article, so a post reads as one set of pictures while
+two different posts do not look alike. `buildFigurePrompt` takes the style as a required
+argument for that reason — a figure has no identity of its own to derive one from.
 
 ### How subtopics are derived
 

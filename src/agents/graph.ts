@@ -47,6 +47,37 @@ function textOf(message: any): string {
 }
 
 /**
+ * Index of the first message belonging to the turn that is now finishing.
+ *
+ * Everything from the last human message onward is this turn; anything before
+ * it belongs to replies Pinky has already read.
+ */
+function startOfTurn(messages: any[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (isHumanMessage(messages[i])) return i + 1;
+  }
+  return 0;
+}
+
+/**
+ * Whether the model ran out of room mid-reply during this turn.
+ *
+ * `stop_reason: "max_tokens"` means the completion was cut off at the output
+ * limit, not finished. The text still arrives and still reads like prose, so
+ * without this check a severed sentence is indistinguishable from a complete
+ * one — which is exactly how truncated replies reached MCP callers unannounced.
+ */
+export function wasTruncated(messages: any[]): boolean {
+  for (let i = startOfTurn(messages); i < messages.length; i++) {
+    const message = messages[i];
+    if (!isAIMessage(message)) continue;
+    const metadata = (message.kwargs ?? message).response_metadata;
+    if (metadata?.stop_reason === "max_tokens") return true;
+  }
+  return false;
+}
+
+/**
  * Returns everything the assistant said during the turn that is now finishing.
  *
  * Not just the final message: a model may speak *and* call a tool in the same
@@ -62,16 +93,8 @@ function textOf(message: any): string {
  * earlier replies in the thread are never re-sent.
  */
 export function extractTurnReply(messages: any[]): string {
-  let start = 0;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (isHumanMessage(messages[i])) {
-      start = i + 1;
-      break;
-    }
-  }
-
   const spoken: string[] = [];
-  for (let i = start; i < messages.length; i++) {
+  for (let i = startOfTurn(messages); i < messages.length; i++) {
     const message = messages[i];
     if (!isAIMessage(message)) continue;
     const content = textOf(message).trim();
@@ -118,6 +141,13 @@ export async function runGraphWorkflow(
     logger.warn("[Brain] Run produced no assistant text; the model returned an empty completion.");
     explanation =
       "Pinky, my cortex returned nothing at all — the model produced an empty response. Try again, or check the LLM provider configuration.";
+  } else if (wasTruncated(messages)) {
+    // Say so rather than hand back a severed sentence as if it were the whole
+    // reply. Raising the output limit makes this rare; it cannot make it
+    // impossible, and a caller that cannot tell has no way to ask for the rest.
+    logger.warn("[Brain] The model stopped at max_tokens; this reply is incomplete.");
+    explanation +=
+      "\n\n_(Cut short — I reached my output limit mid-thought. Ask me to continue.)_";
   }
 
   progressCallback({

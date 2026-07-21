@@ -13,7 +13,7 @@ vi.mock("../../config.js", () => ({
   projectRoot: process.cwd(),
 }));
 
-import { extractTurnReply } from "../../agents/graph.js";
+import { extractTurnReply, wasTruncated } from "../../agents/graph.js";
 
 /**
  * The regression this file exists for.
@@ -95,5 +95,62 @@ describe("extractTurnReply", () => {
       new AIMessage({ content: "", tool_calls: [{ id: "1", name: "list_topics", args: {} }] }),
     ];
     expect(extractTurnReply(messages)).toBe("");
+  });
+});
+
+/**
+ * A reply cut off at the output limit still arrives, still reads like prose,
+ * and still ends on what looks like a sentence — so a caller cannot tell it
+ * apart from a finished one. `stop_reason` is the only signal that it was
+ * severed, which is how an MCP consumer came to report truncated responses.
+ */
+describe("wasTruncated", () => {
+  const cutOff = (text: string) =>
+    new AIMessage({ content: text, response_metadata: { stop_reason: "max_tokens" } });
+
+  it("spots a reply the model stopped at max_tokens", () => {
+    const messages = [
+      new HumanMessage("write the article"),
+      cutOff("…this matrix need not be symmetrical"),
+    ];
+    expect(wasTruncated(messages)).toBe(true);
+  });
+
+  it("leaves a reply that finished on its own alone", () => {
+    const messages = [
+      new HumanMessage("write the article"),
+      new AIMessage({
+        content: "There, Pinky. The manuscript is complete.",
+        response_metadata: { stop_reason: "end_turn" },
+      }),
+    ];
+    expect(wasTruncated(messages)).toBe(false);
+  });
+
+  it("ignores a truncation from an earlier turn", () => {
+    const messages = [
+      new HumanMessage("write the article"),
+      cutOff("…severed mid-thought, but Pinky has already moved on"),
+      new HumanMessage("never mind, list the topics"),
+      new AIMessage({
+        content: "Here stand our pillars of erudition, Pinky.",
+        response_metadata: { stop_reason: "end_turn" },
+      }),
+    ];
+    expect(wasTruncated(messages)).toBe(false);
+  });
+
+  it("spots a truncation in a message followed by a tool call", () => {
+    const messages = [
+      new HumanMessage("write the article"),
+      cutOff("…the sentence that never ended"),
+      new ToolMessage({ tool_call_id: "1", content: "saved" }),
+      new AIMessage({ content: "Saved.", response_metadata: { stop_reason: "end_turn" } }),
+    ];
+    expect(wasTruncated(messages)).toBe(true);
+  });
+
+  it("copes with messages carrying no metadata at all", () => {
+    expect(wasTruncated([new HumanMessage("go"), new AIMessage("A plain reply.")])).toBe(false);
   });
 });

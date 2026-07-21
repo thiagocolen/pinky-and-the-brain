@@ -11,7 +11,7 @@ The service is a single agent — **The Brain** — that guides you (as Pinky) t
 ### Key Characteristics:
 - **Cloud Architecture**: Deployed on AWS ECS / App Runner via Terraform, packaged inside Docker containers.
 - **Deep Agent**: One `createDeepAgent` agent with a persona, custom tools, and a guided conversation flow.
-- **Anthropic Claude**: The only supported LLM provider (`ANTHROPIC_API_KEY`, default `claude-sonnet-5`).
+- **Anthropic Claude**: The only supported LLM provider (`ANTHROPIC_API_KEY`, default `claude-sonnet-5`, `ANTHROPIC_MAX_TOKENS` output tokens per reply, default 16000).
 - **Local SQLite Checkpointing**: Thread states and checkpoints are saved locally via a custom SQLite checkpointer optimized for performance (using WAL mode).
 - **Grounded Retrieval**: Explanations and articles are drawn from a pre-compiled store of curated knowledge (~1.7MB).
 - **Multiple Entrypoints**: Exposes Stdin/Stdout ACP, a REPL CLI, an Express REST API with Server-Sent Events (SSE) streaming support, and a Model Context Protocol (MCP) server.
@@ -170,7 +170,10 @@ Brain: Do you have any instructions for this article?
 You: three paragraphs
 Brain: The deed is done, Pinky! The article resides at:
        .../articles/conways-game-of-life.md
-       Shall I change anything about it?
+       Now, where shall it go? 1. Publish it to the blog
+       2. Save it to a folder  3. Neither
+You: 1
+Brain: [publishes as a draft, then reports the branch, the commit and the review URL]
 ```
 
 ### 2. HTTP & SSE REST Server

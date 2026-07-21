@@ -52,6 +52,12 @@ const ConfigSchema = z.object({
   bucketName: z.string().default("pinky-and-the-brain-agents-state-store-dev-094094788286"),
   anthropicApiKey: z.string().default(""),
   anthropicModel: z.string().default("claude-sonnet-5"),
+  // Output tokens per reply. Bounded above by the Anthropic SDK, which refuses
+  // a non-streaming request whose estimated duration exceeds ten minutes —
+  // `max_tokens` over 128000/6 ≈ 21333 throws before it is ever sent, and every
+  // entrypoint here goes through the non-streaming `invoke()`. Lifting the
+  // ceiling further means streaming the run, not raising this number.
+  anthropicMaxTokens: z.coerce.number().int().positive().default(16000),
   awsRegion: z.string().default("sa-east-1"),
   patbaApiKey: z.string().default(""),
   langchainTracingV2: z.boolean().default(false),
@@ -67,6 +73,13 @@ const ConfigSchema = z.object({
   // just without an image. The text model stays Anthropic; this is images only.
   geminiApiKey: z.string().default(""),
   geminiImageModel: z.string().default("gemini-3.1-flash-lite-image"),
+  // Pixel size requested for every generated image; the cover/figure distinction
+  // is carried by aspect ratio, not by this. Which values a model accepts is a
+  // property of that model rather than of the API: the default image model
+  // serves `1K` and answers 400 for both `512` and `2K`. It lives beside the
+  // model name so that pointing at a model with a different ceiling is a
+  // configuration change rather than a code change.
+  geminiImageSize: z.string().default("1K"),
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema>;
@@ -77,6 +90,9 @@ const rawConfig = {
   bucketName: process.env.S3_BUCKET_NAME || process.env.AWS_S3_BUCKET,
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
   anthropicModel: process.env.ANTHROPIC_MODEL || "claude-sonnet-5",
+  // `|| undefined` so that an empty value falls back to the schema default
+  // rather than coercing to 0 and failing validation at startup.
+  anthropicMaxTokens: process.env.ANTHROPIC_MAX_TOKENS || undefined,
   awsRegion: process.env.AWS_REGION,
   patbaApiKey: process.env.PATBA_API_KEY || process.env.API_KEY || process.env.AWS_APP_API_KEY,
   langchainTracingV2: process.env.LANGCHAIN_TRACING_V2 === "true" || process.env.LANGSMITH_TRACING === "true",
@@ -85,6 +101,7 @@ const rawConfig = {
   blogRepoPath: process.env.BLOG_REPO_PATH,
   geminiApiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
   geminiImageModel: process.env.GEMINI_IMAGE_MODEL,
+  geminiImageSize: process.env.GEMINI_IMAGE_SIZE,
 };
 
 let validatedConfig: AppConfig;

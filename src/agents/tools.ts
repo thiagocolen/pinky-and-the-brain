@@ -5,6 +5,7 @@ import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
 import { generateBodyImage, generateCoverImage, type GeneratedImage } from "../utils/image-gen.js";
+import { styleFor } from "../utils/illustration-styles.js";
 import { BLOG_BRANCH, parseJsonResult, withBlogSession } from "../utils/blog-mcp.js";
 import { logger } from "../utils/logger.js";
 import {
@@ -301,12 +302,19 @@ export async function publishToBlog(
     return `Could not prepare the post: ${e.message}`;
   }
 
+  // One style for the whole article, chosen here and handed to every image, so
+  // that a post's cover and figures read as one set. Derived from the title, so
+  // republishing the same article redraws it in the same style rather than
+  // quietly restyling a post that is already under review.
+  const style = styleFor(post.title);
+  logger.info(`[Tools] Illustrating "${post.title}" in the ${style.label} style (${style.id})`);
+
   // Every generation is independent and each absorbs its own failures, so they
   // run together rather than serially: a publish with four figures should not
   // cost four round trips of latency.
   const [cover, figureImages] = await Promise.all([
-    generateCoverImage(post.title, options.description),
-    Promise.all(post.figures.map((figure) => generateBodyImage(figure.prompt, figure.alt))),
+    generateCoverImage(post.title, options.description, style),
+    Promise.all(post.figures.map((figure) => generateBodyImage(figure.prompt, style, figure.alt))),
   ]);
 
   try {
