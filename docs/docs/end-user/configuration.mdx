@@ -37,7 +37,11 @@ configured, for every entrypoint (`index.ts`, `cli.ts`, `server.ts`, `mcp.ts`).
 | `LANGCHAIN_API_KEY` / `LANGSMITH_API_KEY` | unset | Required for LangSmith tracing to actually send traces. |
 | `LANGCHAIN_PROJECT` / `LANGSMITH_PROJECT` | `pinky-and-the-brain-agents` | LangSmith project name. |
 | `BLOG_REPO_PATH` | `../thiagocolen.github.io` | Checkout of the blog whose `articles` MCP server publishes finished articles. |
-| `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) | unset | Enables cover-image generation. Without it articles still publish, just without an image. |
+| `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) | unset | Enables cover-image generation, and the vector half of [retrieval](/docs/developer/retrieval). Without it articles still publish (without an image) and retrieval still works (BM25 alone). |
+| `RETRIEVAL_MODE` | `hybrid` | `lexical` uses BM25 alone. Hybrid already falls back on its own when there is no key, no embeddings file or a failed call, so set this only to drop the per-turn embedding call deliberately. |
+| `GEMINI_EMBEDDING_MODEL` | `gemini-embedding-001` | Embeds chunks during `npm run ingest`, and queries at run time. |
+| `GEMINI_EMBEDDING_DIM` | `256` | Dimensions kept from the model's native 3072. Changing it invalidates every stored vector — the agent notices the mismatch and ignores them rather than comparing different lengths, so re-run `npm run ingest`. |
+| `CURATED_CONTENT_PATH` | sibling `patb-rag-curated-content` | Folder `npm run ingest` reads source documents from, one directory per area. |
 | `GEMINI_IMAGE_MODEL` | `gemini-3.1-flash-lite-image` | Model used for cover images and article figures. |
 | `GEMINI_IMAGE_SIZE` | `1K` | Pixel tier requested for every generated image. Which tiers a model serves varies — the default one accepts `1K` and refuses both `512` and `2K` — and a refused size is retried once at `1K`, so a wrong value costs latency rather than pictures. |
 

@@ -31,13 +31,20 @@ pinky-and-the-brain/
     storage/                          # State persistence
       sqlite.ts                       # SQLiteCheckpointer extending LangGraph's BaseCheckpointSaver
       s3.ts                           # S3 storage client wrapper (with offline local fallback)
-      vector-store.json               # Pre-compiled vector database
+      knowledge-store.json            # Pre-compiled chunks: id, content, area, source, heading
+      embeddings.bin                  # One quantised 256d vector per chunk (optional)
     scripts/
       ingest.ts                       # Rebuilds the local vector store from source documents
     utils/                            # Shared utilities
       logger.ts                       # Centralized console and file logger (agent.log & stderr)
       messages.ts                     # LangChain message helper functions
       model.ts                        # LLM factory (Anthropic Claude only)
+      retrieval.ts                    # Tokenising, stemming, BM25, rank fusion (pure)
+      embeddings.ts                   # Gemini vectors: quantise, cosine, binary store
+      blog-mcp.ts                     # Client session against the blog's `articles` MCP server
+      image-gen.ts                    # Cover & figure generation (soft-failing)
+      illustration-styles.ts          # The style catalogue and the per-article pick
+      session.ts                      # Stable thread ids for MCP callers
     tests/
       unit/                           # Vitest unit tests
       integration/                    # Vitest integration tests
@@ -65,8 +72,14 @@ pinky-and-the-brain/
   (`graph.ts`).
 - **`protocol/`** contains the ACP-specific JSON-RPC request/response handling used only
   by `src/index.ts`.
-- **`storage/`** contains the two persistence backends: a local SQLite checkpointer used
-  by every entrypoint, and an S3 wrapper used for cloud state storage (with a
-  transparent in-memory fallback).
-- **`utils/`** contains cross-cutting helpers (logging, LangChain message type guards,
-  LLM client construction) with no dependency on any specific entrypoint or protocol.
+- **`storage/`** contains the two persistence backends — a local SQLite checkpointer
+  used by every entrypoint, and an S3 wrapper for cloud state storage (with a
+  transparent in-memory fallback) — plus the knowledge store and its embeddings, both
+  built by `npm run ingest` and both gitignored.
+- **`utils/`** contains cross-cutting helpers with no dependency on any specific
+  entrypoint or protocol: logging, LangChain message type guards, LLM client
+  construction, MCP thread ids, publishing (`blog-mcp.ts`), illustration
+  (`image-gen.ts`, `illustration-styles.ts`) and [retrieval](./retrieval)
+  (`retrieval.ts`, `embeddings.ts`). `retrieval.ts` is deliberately pure — no I/O and
+  no config — so its many edge cases are cheap to test, the same split that keeps
+  `agents/layout.ts` testable.

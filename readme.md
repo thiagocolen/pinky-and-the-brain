@@ -13,7 +13,7 @@ The service is a single agent — **The Brain** — that guides you (as Pinky) t
 - **Deep Agent**: One `createDeepAgent` agent with a persona, custom tools, and a guided conversation flow.
 - **Anthropic Claude**: The only supported LLM provider (`ANTHROPIC_API_KEY`, default `claude-sonnet-5`, `ANTHROPIC_MAX_TOKENS` output tokens per reply, default 16000).
 - **Local SQLite Checkpointing**: Thread states and checkpoints are saved locally via a custom SQLite checkpointer optimized for performance (using WAL mode).
-- **Grounded Retrieval**: Explanations and articles are drawn from a pre-compiled store of curated knowledge (~1.7MB).
+- **Grounded Retrieval (RAG)**: Explanations and articles are drawn from a pre-compiled store of curated knowledge, retrieved by BM25 fused with vector similarity and returned with the source document and section attached. Measured on a labelled query set at 0.900 recall@10, against 0.597 for the substring matching it replaced — see the [Retrieval guide](https://thiagocolen.github.io/pinky-and-the-brain/docs/developer/retrieval).
 - **Multiple Entrypoints**: Exposes Stdin/Stdout ACP, a REPL CLI, an Express REST API with Server-Sent Events (SSE) streaming support, and a Model Context Protocol (MCP) server.
 
 ---
@@ -43,7 +43,8 @@ Articles are written to `./articles/` as markdown — carrying their own layout,
 ### 2. State & Storage Persistence
 *   **SQLite Checkpointer (`src/storage/sqlite.ts`)**: Extends LangGraph's `BaseCheckpointSaver` to persist thread history locally inside `state.db`. Optimized using SQL PRAGMAs (`WAL`, `synchronous=OFF`, `temp_store=MEMORY`).
 *   **AWS S3 Storage (`src/storage/s3.ts`)**: Used to persist state in cloud environments, with an automatic local in-memory fallback for offline/local development.
-*   **Knowledge Store (`src/storage/vector-store.json`)**: Pre-compiled, paragraph-level chunks of curated source documents, tagged by area and rebuilt with `npm run ingest`. Despite the filename it holds no embeddings — retrieval is keyword overlap.
+*   **Knowledge Store (`src/storage/knowledge-store.json`)**: 5,166 pre-compiled, paragraph-level chunks of curated source documents, each carrying a content-addressed id, its area, and the file and heading it came from. Rebuilt with `npm run ingest`.
+*   **Embeddings (`src/storage/embeddings.bin`)**: One quantised 256-dimension vector per chunk (~1.3MB), built during ingest when a Gemini key is present. Optional by design — without them retrieval runs on BM25 alone.
 
 ---
 
@@ -77,13 +78,20 @@ pinky-and-the-brain/
 │   ├── storage/                        # State persistence
 │   │   ├── sqlite.ts                   # SQLiteCheckpointer extending LangGraph's BaseCheckpointSaver
 │   │   ├── s3.ts                       # S3 Storage client wrapper (with offline local fallback)
-│   │   └── vector-store.json           # Pre-compiled vector database
+│   │   ├── knowledge-store.json        # Pre-compiled chunks: id, content, area, source, heading
+│   │   └── embeddings.bin              # One quantised 256d vector per chunk (optional)
 │   └── utils/                          # Shared utilities
 │       ├── logger.ts                   # Centralized console and file logger (agent.log & stderr)
 │       ├── messages.ts                 # Message helper functions
-│       └── model.ts                    # LLM factory (Anthropic Claude only)
+│       ├── model.ts                    # LLM factory (Anthropic Claude only)
+│       ├── retrieval.ts                # Tokenising, stemming, BM25, rank fusion (pure)
+│       ├── embeddings.ts               # Gemini vectors: quantise, cosine, binary store
+│       ├── blog-mcp.ts                 # Client session against the blog's `articles` MCP server
+│       ├── image-gen.ts                # Cover & figure generation (soft-failing)
+│       └── illustration-styles.ts      # The style catalogue and the per-article pick
 ├── scripts/                            # Deploy & operations scripts
 │   ├── deploy.js                       # Deploy orchestration script (Docker build, ECR push, Terraform run)
+│   ├── eval-retrieval.js               # Scores the retrievers against a labelled query set
 │   ├── report-infra.ps1                # PowerShell script for AWS infrastructure status audits
 │   ├── tail-logs.js                    # Script to stream cloud container logs
 │   └── test-tracing.js                 # Script to verify LangSmith tracing connection

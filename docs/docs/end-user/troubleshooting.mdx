@@ -55,10 +55,16 @@ subtopic, and it will proceed.
 
 ### The agent says it found no material for a subtopic
 
-Retrieval is keyword overlap against `src/storage/vector-store.json`, so an unusual
-phrasing can match nothing. Rephrase using terms closer to the stored material (e.g.
-"Conway", "IELTS", "EC2"). If the store is missing or empty, run `npm run ingest` to
-regenerate it.
+Retrieval searches `src/storage/knowledge-store.json` with BM25, fused with vector
+similarity when embeddings are available, so it tolerates paraphrase far better than
+it used to — but the store only covers four areas, and nothing outside them exists to
+find. Rephrase using terms closer to the stored material (e.g. "Conway", "IELTS",
+"EC2"). If the store is missing or empty, run `npm run ingest` to regenerate it.
+
+If answers seem to miss the point of a question, check whether embeddings were built:
+the startup log reports `Loaded N vectors` when they were, and retrieval silently
+falls back to BM25 alone when they were not. See
+[Retrieval](/docs/developer/retrieval).
 
 ### `npm run mcp` / `npm run start` prints unexpected extra text on stdout
 

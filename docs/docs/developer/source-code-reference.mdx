@@ -1,5 +1,5 @@
 ---
-sidebar_position: 5
+sidebar_position: 6
 ---
 
 # Source Code Reference
@@ -78,10 +78,17 @@ Exports `JOURNEY_PROMPT` (the conversation state machine and the teaching loop) 
 ### `tools.ts`
 
 Exports `brainTools` - `list_topics`, `list_subtopics`, `retrieve_content`,
-`save_article`, `update_article`, `read_article` - along with the `TOPICS` registry and
-the functions behind the tools: `retrieveContext(query, area)` (keyword-overlap scoring
-against the vector store), `extractSubtopics(area)`, `resolveTopic()`, and
-`resolveArticlePath()` (which confines model-chosen filenames to `./articles/`).
+`save_article`, `update_article`, `read_article`, `publish_article`, `export_article` -
+along with the `TOPICS` registry and the functions behind the tools:
+`retrieveContext(query, area, limit, { mode })` (BM25 fused with vector similarity;
+see [Retrieval](./retrieval)), `formatPassages()` (which labels each passage with the
+document and section it came from), `loadKnowledgeStore()`, `loadEmbeddingStore()`,
+`extractSubtopics(area)`, `resolveTopic()`, and `resolveArticlePath()` (which confines
+model-chosen filenames to `./articles/`).
+
+`retrieveContext` is async, because the vector half embeds the query. Its `mode`
+argument exists only so the evaluation harness can score both retrievers in one
+process; the agent leaves it alone and takes the configured default.
 
 ## Protocol (`src/protocol/`)
 
@@ -110,6 +117,22 @@ Zod schemas for JSON-RPC requests and every ACP method's params
 `@aws-sdk/client-s3` or an in-memory `Map` fallback.
 
 ## Utils (`src/utils/`)
+
+### `retrieval.ts`
+
+The lexical retriever, and pure: no I/O, no config, no knowledge of where chunks come
+from. `chunkId()` (content-addressed identity), `tokenize()`, `stem()`, `STOPWORDS`,
+`buildIndex()`, `search()` (BM25) and `fuseRankings()` (reciprocal rank fusion).
+Every rule in it fixes a measured defect of the substring-counting scorer it replaced —
+see [Retrieval](./retrieval).
+
+### `embeddings.ts`
+
+The vector half, and soft-failing throughout: `embed()` (Gemini, with backoff on a
+429), `embedQuery()` (memoised, since a teaching loop retrieves the same subtopic
+repeatedly), `normalise()`, `quantise()`, `cosine()`, and `encodeStore()` /
+`decodeStore()` for the binary `embeddings.bin` format. A missing key, a refusal or a
+network error returns null and retrieval continues on BM25 alone.
 
 ### `model.ts`
 
@@ -176,6 +199,10 @@ in the project root, gated by the `LOG_LEVEL` environment variable
 
 ### `src/scripts/ingest.ts`
 
-Walks a source documents directory tree, splits files into paragraph-level chunks, and
-writes them (tagged with an `area`) into `src/storage/vector-store.json`. Supports a
-`--remote` flag (`npm run ingest:remote`) for ingesting from a remote source.
+Walks the curated corpus (`CURATED_CONTENT_PATH`), splits files into paragraph-level
+chunks, and writes them into `src/storage/knowledge-store.json` tagged with an `area`,
+a content-addressed `id`, the `source` file and the nearest `heading`. Duplicate
+paragraphs collapse by id. When a Gemini key is present it also embeds every chunk
+that does not already have a vector and writes `src/storage/embeddings.bin` —
+resumable, because reuse is keyed on that id. See
+[Retrieval](/docs/developer/retrieval).
