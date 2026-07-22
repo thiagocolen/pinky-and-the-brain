@@ -80,6 +80,24 @@ const ConfigSchema = z.object({
   // model name so that pointing at a model with a different ceiling is a
   // configuration change rather than a code change.
   geminiImageSize: z.string().default("1K"),
+  // Where `npm run ingest` reads the curated source documents from. This used
+  // to be three hard-coded paths inside the script, the last of them an
+  // absolute Windows path, which meant ingest only ever worked on one machine.
+  curatedContentPath: z.string().default(""),
+  // Retrieval. `hybrid` fuses BM25 with vector similarity; `lexical` is BM25
+  // alone. Hybrid degrades to lexical on its own when there is no Gemini key or
+  // no embeddings file, so this exists to turn the vectors off deliberately —
+  // to remove a per-turn API call, or to compare the two.
+  retrievalMode: z.enum(["hybrid", "lexical"]).default("hybrid"),
+  geminiEmbeddingModel: z.string().default("gemini-embedding-001"),
+  // 256 of the model's native 3072 dimensions. It is a Matryoshka model, so a
+  // truncated vector is still a usable one, and 256 keeps the whole file under
+  // 2 MB — which matters because the store is not fetched at runtime, it is
+  // baked into the container by `COPY src/` and then scanned in memory on every
+  // query. Changing this invalidates every stored vector: the dimension is
+  // recorded in the file, and a mismatch makes the agent ignore the vectors
+  // rather than compare ones of different lengths.
+  geminiEmbeddingDim: z.coerce.number().int().positive().default(256),
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema>;
@@ -102,6 +120,10 @@ const rawConfig = {
   geminiApiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
   geminiImageModel: process.env.GEMINI_IMAGE_MODEL,
   geminiImageSize: process.env.GEMINI_IMAGE_SIZE,
+  curatedContentPath: process.env.CURATED_CONTENT_PATH,
+  retrievalMode: process.env.RETRIEVAL_MODE || undefined,
+  geminiEmbeddingModel: process.env.GEMINI_EMBEDDING_MODEL,
+  geminiEmbeddingDim: process.env.GEMINI_EMBEDDING_DIM || undefined,
 };
 
 let validatedConfig: AppConfig;
