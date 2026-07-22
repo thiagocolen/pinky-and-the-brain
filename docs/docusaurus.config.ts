@@ -5,7 +5,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 const config: Config = {
   title: "Pinky n' The Brain Agent",
   tagline:
-    'A guided teaching and article-writing agent. Muilt-RAG system, AWS hosted, built with Deep Agents on LangGraph.js',
+    'A guided teaching and article-writing agent. RAG system, AWS hosted, built with Deep Agents on LangGraph.js',
   favicon: 'img/favicon.ico',
 
   // Set the production url of your site here
