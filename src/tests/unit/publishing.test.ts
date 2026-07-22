@@ -205,6 +205,40 @@ describe("renderBody", () => {
   });
 });
 
+describe("the article signature", () => {
+  // The signature is authored by the model, not appended by code, so the only
+  // thing holding it together is the literal text in ARTICLE_CRAFT_PROMPT.
+  // These tests render *that* text rather than a copy of it, which is what
+  // stops the instruction and the renderer from drifting apart.
+  const SIGNATURE =
+    "*Written by **The Brain**, of " +
+    "[Pinky and the Brain Agents](https://github.com/thiagocolen/pinky-and-the-brain).*";
+
+  it("is the wording the writing standard actually asks for", () => {
+    expect(ARTICLE_CRAFT_PROMPT).toContain(SIGNATURE);
+  });
+
+  it("renders as a rule and a credit linking back to the repository", () => {
+    const html = renderBody(`The closing paragraph.\n\n---\n\n${SIGNATURE}`);
+    expect(html).toContain("<hr>");
+    expect(html).toContain('href="https://github.com/thiagocolen/pinky-and-the-brain"');
+    expect(html).toContain("<strong>The Brain</strong>");
+  });
+
+  it("survives publication as the last thing in the body", () => {
+    const post = preparePost(`# Lenia\n\nA continuous automaton.\n\n---\n\n${SIGNATURE}`);
+    expect(post.body.trimEnd()).toMatch(/Pinky and the Brain Agents<\/a>\.<\/em><\/p>$/);
+  });
+
+  it("swallows the closing paragraph when the blank line is missing", () => {
+    // Why the standard is emphatic about that blank line: three hyphens pressed
+    // against a paragraph are setext underlining, not a thematic break, and the
+    // article's last sentence ships as an <h2>.
+    const html = renderBody(`The closing paragraph.\n---\n\n${SIGNATURE}`);
+    expect(html).toContain("<h2>The closing paragraph.</h2>");
+  });
+});
+
 describe("escapeAttribute", () => {
   it("neutralises quotes and braces that would break the tag or the build", () => {
     expect(escapeAttribute('a "quoted" {brace}')).toBe("a &quot;quoted&quot; &#123;brace&#125;");

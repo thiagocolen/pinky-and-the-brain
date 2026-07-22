@@ -26,7 +26,7 @@ One Deep Agent, assembled in `agent.ts` from a model, tools, and a system prompt
 
 *   **Persona (`persona.ts`)**: The Brain's voice — eloquent, imperious, addressing the user as Pinky. The persona never overrides technical accuracy.
 *   **Journey (`prompts.ts`)**: The conversation flow (greet → topic → subtopic → learn or write an article → repeat) and the teaching loop (decompose → explain → test → re-explain until understood).
-*   **Writing standard (`prompts.ts`)**: `ARTICLE_CRAFT_PROMPT` — the rules every article is written to, distilled from five sources on article craft, plus the layout marks that give a post its shape. See the [Article Writing Guide](https://thiagocolen.github.io/pinky-and-the-brain/docs/developer/article-writing-guide).
+*   **Writing standard (`prompts.ts`)**: `ARTICLE_CRAFT_PROMPT` — the rules every article is written to, distilled from five sources on article craft, plus the layout marks that give a post its shape and the signature that closes it. See the [Article Writing Guide](https://thiagocolen.github.io/pinky-and-the-brain/docs/developer/article-writing-guide).
 *   **Layout (`layout.ts`)**: turns an article's own marks — an `###` deck, `:::note|tip|warn` callouts, `![alt](image: prompt)` figures — into the blog's MDX. Pure transforms, no I/O.
 *   **Tools (`tools.ts`)**: `list_topics`, `list_subtopics`, `retrieve_content`, `save_article`, `update_article`, `read_article`, `publish_article`, `export_article`.
 *   **Compatibility (`graph.ts`)**: `runGraphWorkflow()` — the single function every entrypoint calls.
@@ -38,7 +38,7 @@ Topics of expertise, read from the knowledge store:
 *   **English for Certifications**: Coaching for IELTS, TOEFL, and Cambridge exams.
 *   **Technical Interview Preparation**: Role-based roadmaps for frontend/backend software engineering roles.
 
-Articles are written to `./articles/` as markdown — carrying their own layout, so what you review is the shape the post will have — and published to the blog through the `articles` MCP server that ships inside [thiagocolen.github.io](https://github.com/thiagocolen/thiagocolen.github.io). Publishing renders that layout, generates a cover image and one illustration per figure, and files the result as a draft. The blog owns its own post format, so this agent is a client of it rather than a second opinion about it. See [Agent Flow](https://thiagocolen.github.io/pinky-and-the-brain/docs/developer/agent-flow) for the full journey diagram and design rationale.
+Articles are written to `./articles/` as markdown — carrying their own layout and their signature, so what you review is the shape the post will have — and published to the blog through the `articles` MCP server that ships inside [thiagocolen.github.io](https://github.com/thiagocolen/thiagocolen.github.io). Publishing renders that layout, generates a cover image and one illustration per figure, and files the result as a draft. The blog owns its own post format, so this agent is a client of it rather than a second opinion about it. See [Agent Flow](https://thiagocolen.github.io/pinky-and-the-brain/docs/developer/agent-flow) for the full journey diagram and design rationale.
 
 ### 2. State & Storage Persistence
 *   **SQLite Checkpointer (`src/storage/sqlite.ts`)**: Extends LangGraph's `BaseCheckpointSaver` to persist thread history locally inside `state.db`. Optimized using SQL PRAGMAs (`WAL`, `synchronous=OFF`, `temp_store=MEMORY`).

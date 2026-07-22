@@ -209,7 +209,51 @@ a medium or a technique in a figure prompt only fights that choice. Which style
 an article gets, and where to change the catalogue, is in
 [Agent Flow](./agent-flow#adding-instructions-about-the-illustrations).
 
-## 7. Revise — as a separate act
+## 7. The signature
+
+Every article closes with the same four lines, written into the file as the
+article is written:
+
+````markdown
+
+---
+
+*Written by **The Brain**, of [Pinky and the Brain Agents](https://github.com/thiagocolen/pinky-and-the-brain).*
+````
+
+This is a house convention rather than anything the five sources argue for, and
+it answers a question a reader of the blog can otherwise only guess at: who wrote
+this, and what wrote it. The link is the honest answer — the agent, its prompts
+and this guide are all in that repository, so a reader who wants to know how the
+piece was produced can go and read the machinery.
+
+Three properties are deliberate.
+
+**It is fixed wording, not a closing line.** The standard gives the exact text and
+asks for it verbatim. A credit reworded per article is a flourish; a credit that
+reads the same everywhere is a signature, and only the second one is recognisable
+as such after a dozen posts.
+
+**It lives in the article file, not in the publisher.** It would be easy — and
+more reliable — to have `publish_article` append it the way it attaches a cover
+image. It is in the file instead, for the reason the layout is: what Pinky reviews
+before publishing should be the finished article, and a finished article is a
+signed one. The cost of that choice is that nothing enforces it; the standard, the
+checklist and the `BRAIN_SYSTEM_PROMPT` regression tests are what hold it in place.
+
+**The blank line before the `---` is load-bearing.** Three hyphens directly beneath
+a paragraph are setext underlining in markdown, not a thematic break, so a
+signature pressed against the last paragraph silently promotes that paragraph to an
+`<h2>` and the article ends on a heading. With the blank line it renders as `<hr>`
+followed by the credit. Both behaviours are pinned by tests in
+`src/tests/unit/publishing.test.ts`, which render the wording taken from
+`ARTICLE_CRAFT_PROMPT` itself rather than a copy of it — so the instruction and the
+renderer cannot drift apart.
+
+On revision, the signature is already in the file and stays where it is. Adding it
+a second time is the failure mode to watch for.
+
+## 8. Revise — as a separate act
 
 Nair and Hughes both separate drafting from editing rather than interleaving
 them.
@@ -225,7 +269,7 @@ obstacle is rarely "how do I start" — it is self-doubt, fear of ridicule and
 impostor syndrome. His answer is that the only way past them is to start, and
 that a process to follow is what keeps you from getting lost.
 
-## 8. The checklist
+## 9. The checklist
 
 Before an article is finished:
 
@@ -243,6 +287,7 @@ Before an article is finished:
 - [ ] Sentence structure and vocabulary vary.
 - [ ] Claims are supported by fact, example, statistic or quotation.
 - [ ] Nothing is longer than it needs to be.
+- [ ] The signature closes the file — once, word for word, with its blank line intact.
 - [ ] It has been edited in a pass of its own, for grammar, flow, relevance and focus.
 
 ## Sources

@@ -40,7 +40,7 @@ flowchart TD
     Action -->|Write an article| Instructions["Any instructions<br/>for the article?"]
 
     Instructions --> Compose["retrieve_content<br/>→ compose per the writing guide<br/>honouring instructions"]
-    Compose --> Save["save_article<br/>→ ./articles/*.md<br/>deck, callouts and figures included"]
+    Compose --> Save["save_article<br/>→ ./articles/*.md<br/>deck, callouts, figures<br/>and the signature included"]
     Save --> Deliver{"Reports the exact file path<br/>and its layout, then:<br/>where should it go?"}
 
     Deliver -->|Change something instead| Confirm["Restates the change<br/>asks for confirmation"]
@@ -114,12 +114,16 @@ For a single article the sequence is:
    under the title, `:::note|tip|warn` callouts, and `![alt](image: prompt)` figures. The
    layout lives in the markdown so that what Pinky reviews is the real shape of the post,
    not a description of one.
-5. **Save and offer delivery in one breath.** `save_article` writes `./articles/<slug>.md`, and
+5. **Sign it.** The file ends with a fixed credit line naming The Brain and linking back to
+   this repository. It is in the file for the same reason the layout is — the article Pinky
+   reviews is the signed article — and its wording is verbatim rather than composed per
+   piece, because a signature that varies is not a signature.
+6. **Save and offer delivery in one breath.** `save_article` writes `./articles/<slug>.md`, and
    the same turn reports the path, describes the layout, and presents the delivery menu. There
    is deliberately no "anything to change?" pause: a revision request simply arrives in place of
    a destination, and revisions still go through `update_article`, only after Pinky confirms the
    change.
-6. **Deliver.** Step 4c offers the blog, a folder, or neither. Choosing the blog publishes
+7. **Deliver.** Step 4c offers the blog, a folder, or neither. Choosing the blog publishes
    immediately — The Brain writes the listing description and tags itself and reports what it
    used, rather than asking for them and then asking again whether to push.
 
