@@ -32,14 +32,17 @@ pinky-and-the-brain/
     storage/                          # State persistence
       sqlite.ts                       # SQLiteCheckpointer extending LangGraph's BaseCheckpointSaver
       s3.ts                           # S3 storage client wrapper (with offline local fallback)
-      vector-store.json               # Pre-compiled vector database
+      knowledge-store.json            # Pre-compiled chunks: id, content, area, source, heading
+      embeddings.bin                  # One quantised 256d vector per chunk (optional)
     scripts/
       ingest.ts                       # Rebuilds the local vector store from source documents
     utils/                            # Shared utilities
       logger.ts                       # Centralized console and file logger (agent.log & stderr)
       messages.ts                     # LangChain message helper functions
       model.ts                        # LLM factory (Anthropic Claude only)
-      blog-mcp.ts                     # Client session against the blog's own `articles` MCP server
+      retrieval.ts                    # Tokenising, stemming, BM25, rank fusion (pure)
+      embeddings.ts                   # Gemini vectors: quantise, cosine, binary store
+      blog-mcp.ts                     # Client session against the blog's `articles` MCP server
       image-gen.ts                    # Cover & figure generation (soft-failing)
       illustration-styles.ts          # The style catalogue and the per-article pick
       session.ts                      # Stable thread ids for MCP callers

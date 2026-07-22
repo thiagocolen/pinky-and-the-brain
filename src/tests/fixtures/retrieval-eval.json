@@ -1,0 +1,120 @@
+{
+  "$comment": [
+    "Ground truth for `npm run eval:retrieval`.",
+    "",
+    "Twenty queries phrased the way someone would actually ask them, each paired",
+    "with the chunks that genuinely answer it. Labelled by hand: candidates were",
+    "surfaced from the store, then read and kept or discarded one at a time.",
+    "",
+    "Chunks are named by their content-addressed `id`, never by position, so",
+    "re-ingesting the corpus does not silently invalidate this file. If a chunk's",
+    "own text is edited its id changes and it drops out of the gold set — which is",
+    "the intended behaviour: the labelling was for the text as it read at the time.",
+    "",
+    "The gold sets are deliberately conservative. A passage is listed only if it",
+    "answers the question, not merely if it mentions the subject, so recall is",
+    "measured against material a reader would actually be glad to receive."
+  ],
+  "queries": [
+    {
+      "query": "How does Conway's Game of Life decide whether a cell lives or dies?",
+      "area": "cellular-automata",
+      "relevant": ["b404537a1840", "138ae89e3900", "29d8a9a2c206", "b39b2a2f9e0d", "3f67eaf172bc"]
+    },
+    {
+      "query": "What is Lenia and how does it generalise the Game of Life?",
+      "area": "cellular-automata",
+      "relevant": ["8a9d4529d621", "4bb32bfae6aa", "b39b2a2f9e0d"]
+    },
+    {
+      "query": "What does Rule 30 show about entropy and the second law of thermodynamics?",
+      "area": "cellular-automata",
+      "relevant": ["22acdc472af4", "a20cf9c1311b", "5099858083a9"]
+    },
+    {
+      "query": "How do particle systems produce lifelike structures from simple rules?",
+      "area": "cellular-automata",
+      "relevant": ["53845f4e8957", "3e03632129ba", "f012d221bad0", "0253f699b702", "3667ec1fcbe1", "24e9d72b07b2"]
+    },
+    {
+      "query": "What are neural cellular automata?",
+      "area": "cellular-automata",
+      "relevant": ["6ba3d444c71d", "a7b169b4994e", "624e9088b41c"]
+    },
+    {
+      "query": "What is the principle of computational equivalence?",
+      "area": "cellular-automata",
+      "relevant": ["d992302b21d7", "ae2dec83742a", "b0a0c714903b"]
+    },
+    {
+      "query": "What are elementary cellular automata?",
+      "area": "cellular-automata",
+      "relevant": ["457db6ca1cfd", "217a6c159a01", "785d06c7f0fd"]
+    },
+    {
+      "query": "How does a simple rule create emergent complexity?",
+      "area": "cellular-automata",
+      "relevant": ["41660816ed11", "4a51f410679e", "754c04407efb"]
+    },
+    {
+      "query": "What is the structure of the IELTS exam?",
+      "area": "english-certification-instructor",
+      "relevant": ["ef2b4546f5dd"]
+    },
+    {
+      "query": "How is the TOEFL iBT organised?",
+      "area": "english-certification-instructor",
+      "relevant": ["5d9fb4b9c219"]
+    },
+    {
+      "query": "Which Cambridge English exams are there?",
+      "area": "english-certification-instructor",
+      "relevant": ["df9d4a7cd9f1"]
+    },
+    {
+      "query": "What should I know about React hooks?",
+      "area": "job-techinical-interview",
+      "relevant": ["a5a9ad93aa55", "cdbbb22baa9c", "e96488e6c014"]
+    },
+    {
+      "query": "Explain closures in JavaScript",
+      "area": "job-techinical-interview",
+      "relevant": ["8617d4e177d2"]
+    },
+    {
+      "query": "How should I approach a system design interview?",
+      "area": "job-techinical-interview",
+      "relevant": ["761a79ce0fc1", "01787239bfcd", "1870d3a5729c", "5559bac7883d"]
+    },
+    {
+      "query": "How does the Node.js event loop work?",
+      "area": "job-techinical-interview",
+      "relevant": ["4052897f5ff3", "2d42871027a7"]
+    },
+    {
+      "query": "What does an Angular developer need to learn?",
+      "area": "job-techinical-interview",
+      "relevant": ["165a0806ee03", "6281ee32b4c7", "f2a5fe7906df", "7b78f977cb69"]
+    },
+    {
+      "query": "What S3 storage classes are available?",
+      "area": "aws-tutor",
+      "relevant": ["33fa9c6b0c57", "3d43914213dd", "4de6a8ac3aa0"]
+    },
+    {
+      "query": "What is the AWS shared responsibility model?",
+      "area": "aws-tutor",
+      "relevant": ["d50d0a88678e", "b8e037081647"]
+    },
+    {
+      "query": "What do the AWS support plans include?",
+      "area": "aws-tutor",
+      "relevant": ["1d1beac2ae5d", "8c09ba881c59", "2d827afe398f", "93345b293dcf"]
+    },
+    {
+      "query": "How do security groups control traffic to an instance?",
+      "area": "aws-tutor",
+      "relevant": ["c01247148260", "a78d29e23f82", "9e94dc67b83c"]
+    }
+  ]
+}

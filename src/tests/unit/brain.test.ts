@@ -11,6 +11,12 @@ vi.mock("../../config.js", () => ({
     blogRepoPath: "/nonexistent/blog-checkout",
     geminiApiKey: "",
     geminiImageModel: "gemini-3.1-flash-lite-image",
+    // No key, so `embedQuery` returns null and retrieval falls back to BM25.
+    // These tests are about the lexical retriever; the hybrid path is covered
+    // in retrieval.test.ts through the embedder seam, without a network.
+    retrievalMode: "hybrid",
+    geminiEmbeddingModel: "gemini-embedding-001",
+    geminiEmbeddingDim: 256,
   },
   projectRoot: process.cwd(),
 }));
@@ -22,9 +28,11 @@ import {
   extractSubtopics,
   resolveArticlePath,
   loadVectorStore,
+  formatPassages,
   __setVectorStore,
   __resetVectorStore,
 } from "../../agents/tools.js";
+import { chunkId } from "../../utils/retrieval.js";
 import { BRAIN_SYSTEM_PROMPT } from "../../agents/prompts.js";
 
 describe("Topic registry", () => {
@@ -60,30 +68,46 @@ describe("retrieveContext", () => {
     __resetVectorStore();
   });
 
-  it("retrieves material for aws-tutor", () => {
-    const results = retrieveContext("DynamoDB and IAM policies", "aws-tutor");
+  it("retrieves material for aws-tutor", async () => {
+    const results = await retrieveContext("DynamoDB and IAM policies", "aws-tutor");
     expect(results.length).toBeGreaterThan(0);
   });
 
-  it("retrieves material for the interview area", () => {
-    const results = retrieveContext("JavaScript closure and hooks", "job-techinical-interview");
+  it("retrieves material for the interview area", async () => {
+    const results = await retrieveContext("JavaScript closure and hooks", "job-techinical-interview");
     expect(results.length).toBeGreaterThan(0);
   });
 
-  it("ranks chunks containing more query terms first", () => {
+  it("ranks chunks matching more query terms first", async () => {
     __setVectorStore([
       { area: "test", content: "nothing relevant here" },
       { area: "test", content: "alpha only" },
       { area: "test", content: "alpha beta gamma together" },
     ]);
-    const results = retrieveContext("alpha beta gamma", "test");
-    expect(results[0]).toBe("alpha beta gamma together");
-    expect(results).not.toContain("nothing relevant here");
+    const results = await retrieveContext("alpha beta gamma", "test");
+    expect(results[0].content).toBe("alpha beta gamma together");
+    expect(results.map((r) => r.content)).not.toContain("nothing relevant here");
   });
 
-  it("returns nothing for an unknown area", () => {
+  it("returns nothing for an unknown area", async () => {
     __setVectorStore([{ area: "test", content: "alpha" }]);
-    expect(retrieveContext("alpha", "no-such-area")).toEqual([]);
+    expect(await retrieveContext("alpha", "no-such-area")).toEqual([]);
+  });
+
+  it("carries provenance back so a claim can be attributed", async () => {
+    __setVectorStore([
+      { area: "test", content: "Lenia uses a continuous growth mapping.", source: "ca/lenia.md", heading: "Growth" },
+    ]);
+    const [hit] = await retrieveContext("continuous growth mapping", "test");
+    expect(hit.source).toBe("ca/lenia.md");
+    expect(hit.heading).toBe("Growth");
+    expect(formatPassages([hit])).toContain("passage 1 — ca/lenia.md § Growth");
+  });
+
+  it("gives every chunk a stable id even when the store predates them", async () => {
+    __setVectorStore([{ area: "test", content: "alpha beta" }]);
+    const [hit] = await retrieveContext("alpha", "test");
+    expect(hit.id).toBe(chunkId("alpha beta"));
   });
 });
 

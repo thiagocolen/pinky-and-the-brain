@@ -30,7 +30,8 @@
     "test-tracing": "node scripts/test-tracing.js",
     "ls-studio": "npx @langchain/langgraph-cli dev",
     "bridge": "node scripts/archive/acp-remote-bridge.js",
-    "bridge:debug": "node --inspect scripts/archive/acp-remote-bridge.js"
+    "bridge:debug": "node --inspect scripts/archive/acp-remote-bridge.js",
+    "eval:retrieval": "node scripts/eval-retrieval.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.500.0",

@@ -8,6 +8,17 @@ import { generateBodyImage, generateCoverImage, type GeneratedImage } from "../u
 import { styleFor } from "../utils/illustration-styles.js";
 import { BLOG_BRANCH, parseJsonResult, withBlogSession } from "../utils/blog-mcp.js";
 import { logger } from "../utils/logger.js";
+import { config } from "../config.js";
+import {
+  buildIndex,
+  chunkId,
+  fuseRankings,
+  search,
+  type BM25Index,
+  type KnowledgeChunk,
+  type RetrievedChunk,
+} from "../utils/retrieval.js";
+import { cosine, decodeStore, embedQuery, type EmbeddingStore } from "../utils/embeddings.js";
 import {
   extractFigures,
   renderBody,
@@ -24,10 +35,7 @@ export { escapeForMdx, splitHeadline, extractFigures, renderBody, type Figure } 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-interface DbChunk {
-  content: string;
-  area: string;
-}
+export type { KnowledgeChunk, RetrievedChunk } from "../utils/retrieval.js";
 
 /**
  * A topic of expertise, mapped to the `area` key used inside the vector store.
@@ -77,70 +85,176 @@ export function resolveTopic(nameOrId: string): Topic | undefined {
   );
 }
 
-let dbCache: DbChunk[] = [];
+let dbCache: KnowledgeChunk[] = [];
 let isDbLoaded = false;
+/** One BM25 index per area, built on first use and dropped whenever the store changes. */
+const indexCache = new Map<string, BM25Index>();
 
-/** Loads and caches the pre-ingested store. Paths cover both src and dist layouts. */
-export function loadVectorStore(): DbChunk[] {
-  if (isDbLoaded) return dbCache;
-  const possiblePaths = [
-    path.resolve(__dirname, "../storage/vector-store.json"),
-    path.resolve(__dirname, "../../src/storage/vector-store.json"),
-    path.resolve(__dirname, "../../../src/storage/vector-store.json"),
+/** Both filenames, newest first: the store was called `vector-store.json` while it held no vectors. */
+const STORE_FILENAMES = ["knowledge-store.json", "vector-store.json"];
+
+function storeCandidates(filename: string): string[] {
+  return [
+    path.resolve(__dirname, `../storage/${filename}`),
+    path.resolve(__dirname, `../../src/storage/${filename}`),
+    path.resolve(__dirname, `../../../src/storage/${filename}`),
   ];
-  for (const storePath of possiblePaths) {
-    if (fs.existsSync(storePath)) {
+}
+
+/**
+ * Loads and caches the pre-ingested store. Paths cover both src and dist layouts.
+ *
+ * Chunks written before the store carried identities are normalised on the way
+ * in: an id is derived from the content, which is exactly what the ingest
+ * pipeline would have written, so an older file keeps working and produces the
+ * same ids it would have been given.
+ */
+export function loadKnowledgeStore(): KnowledgeChunk[] {
+  if (isDbLoaded) return dbCache;
+  for (const filename of STORE_FILENAMES) {
+    for (const storePath of storeCandidates(filename)) {
+      if (!fs.existsSync(storePath)) continue;
       try {
-        dbCache = JSON.parse(fs.readFileSync(storePath, "utf-8"));
+        const raw = JSON.parse(fs.readFileSync(storePath, "utf-8")) as KnowledgeChunk[];
+        dbCache = raw.map((chunk) => ({ ...chunk, id: chunk.id ?? chunkId(chunk.content) }));
         isDbLoaded = true;
         logger.info(`[Tools] Loaded ${dbCache.length} chunks from ${storePath}`);
-        break;
+        return dbCache;
       } catch (e: any) {
-        logger.error("Failed to parse vector store: " + e.message);
+        logger.error("Failed to parse knowledge store: " + e.message);
       }
     }
   }
   return dbCache;
 }
 
+/** Kept as the historical name; the store it loads is no longer called that. */
+export const loadVectorStore = loadKnowledgeStore;
+
 /** Test seam: replaces the cached store. */
-export function __setVectorStore(chunks: DbChunk[]): void {
-  dbCache = chunks;
+export function __setVectorStore(chunks: Array<Partial<KnowledgeChunk> & { content: string; area: string }>): void {
+  dbCache = chunks.map((chunk) => ({ ...chunk, id: chunk.id ?? chunkId(chunk.content) }));
   isDbLoaded = true;
+  indexCache.clear();
 }
 
 /** Test seam: drops the cache so the next read loads from disk again. */
 export function __resetVectorStore(): void {
   dbCache = [];
   isDbLoaded = false;
+  indexCache.clear();
+  embeddingStore = undefined;
+  isEmbeddingStoreLoaded = false;
+}
+
+function indexFor(area: string, chunks: KnowledgeChunk[]): BM25Index {
+  let index = indexCache.get(area);
+  if (!index) {
+    index = buildIndex(chunks);
+    indexCache.set(area, index);
+  }
+  return index;
+}
+
+let embeddingStore: EmbeddingStore | undefined;
+let isEmbeddingStoreLoaded = false;
+
+/**
+ * Loads the vector file, if one was ever built.
+ *
+ * Absent is the normal case, not an error: embeddings are produced by ingest
+ * only when a Gemini key is configured, and retrieval is designed to work
+ * without them.
+ */
+export function loadEmbeddingStore(): EmbeddingStore | undefined {
+  if (isEmbeddingStoreLoaded) return embeddingStore;
+  isEmbeddingStoreLoaded = true;
+  for (const candidate of storeCandidates("embeddings.bin")) {
+    if (!fs.existsSync(candidate)) continue;
+    const decoded = decodeStore(fs.readFileSync(candidate));
+    if (!decoded) {
+      logger.warn(`[Tools] ${candidate} is not a readable embedding store; ignoring it.`);
+      continue;
+    }
+    if (decoded.dim !== config.geminiEmbeddingDim) {
+      // Comparing vectors of different lengths is meaningless, and silently
+      // truncating one side would return confident nonsense.
+      logger.warn(
+        `[Tools] Embeddings are ${decoded.dim}d but GEMINI_EMBEDDING_DIM is ${config.geminiEmbeddingDim}; ignoring them. Re-run 'npm run ingest'.`,
+      );
+      continue;
+    }
+    embeddingStore = decoded;
+    logger.info(`[Tools] Loaded ${decoded.vectors.size} vectors (${decoded.dim}d, ${decoded.model})`);
+    break;
+  }
+  return embeddingStore;
 }
 
 /**
- * Scores chunks in an area by how many query terms they contain and returns the
- * best ones. Keyword overlap, not embeddings — the store holds no vectors.
+ * Retrieves source passages for a query within one area.
+ *
+ * Two retrievers, fused. BM25 supplies exact lexical matching — the terms the
+ * reader actually typed, weighted by how rare they are — and vector similarity
+ * supplies the rest: a question about "how cells die" reaching a passage about
+ * "underpopulation" that shares not one word with it. Neither subsumes the
+ * other, which is why the results are fused by rank rather than one being
+ * chosen over the other.
+ *
+ * Every path degrades to BM25 alone: no key, no embeddings file, a dimension
+ * mismatch, or a failed embedding call. Lexical retrieval is a complete
+ * retriever, so the vectors improve an answer rather than gate one.
+ *
+ * Each retriever is asked for more than `limit` because fusion needs
+ * disagreement to work with — a passage ranked 12th by BM25 and 2nd by
+ * similarity should be able to surface, and it cannot if BM25 was only ever
+ * asked for its top 10.
  */
-export function retrieveContext(query: string, area: string, limit = 10): string[] {
-  const store = loadVectorStore();
+export async function retrieveContext(
+  query: string,
+  area: string,
+  limit = 10,
+  // `mode` exists so the evaluation harness can score both retrievers in one
+  // process; everything in the agent leaves it alone and takes the configured
+  // default.
+  options: { mode?: "hybrid" | "lexical" } = {},
+): Promise<RetrievedChunk[]> {
+  const store = loadKnowledgeStore();
   if (store.length === 0) return [];
 
-  const queryTerms = query.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
   const areaStore = store.filter((chunk) => chunk.area === area);
   if (areaStore.length === 0) return [];
 
-  const scored = areaStore.map((chunk) => {
-    const contentLower = chunk.content.toLowerCase();
-    let score = 0;
-    for (const term of queryTerms) {
-      if (contentLower.includes(term)) score++;
-    }
-    return { chunk, score };
-  });
+  const pool = limit * 3;
+  const lexical = search(indexFor(area, areaStore), query, pool);
 
-  return scored
-    .filter((item) => item.score > 0 || queryTerms.length === 0)
-    .sort((a, b) => b.score - a.score)
+  if ((options.mode ?? config.retrievalMode) === "lexical") return lexical.slice(0, limit);
+
+  const vectors = loadEmbeddingStore();
+  if (!vectors) return lexical.slice(0, limit);
+
+  const queryVector = await embedQuery(query);
+  if (!queryVector) return lexical.slice(0, limit);
+
+  const semantic = areaStore
+    .map((chunk) => {
+      const vector = vectors.vectors.get(chunk.id);
+      return vector ? { chunk, score: cosine(queryVector, vector) } : undefined;
+    })
+    .filter((hit): hit is { chunk: KnowledgeChunk; score: number } => hit !== undefined)
+    .sort((a, b) => b.score - a.score || a.chunk.id.localeCompare(b.chunk.id))
+    .slice(0, pool);
+
+  if (semantic.length === 0) return lexical.slice(0, limit);
+
+  const fused = fuseRankings([lexical.map((c) => c.id), semantic.map((h) => h.chunk.id)]);
+  const byId = new Map<string, KnowledgeChunk>();
+  for (const chunk of [...lexical, ...semantic.map((h) => h.chunk)]) byId.set(chunk.id, chunk);
+
+  return [...fused.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .slice(0, limit)
-    .map((item) => item.chunk.content);
+    .map(([id, score]) => ({ ...(byId.get(id) as KnowledgeChunk), score }));
 }
 
 /**
@@ -440,22 +554,40 @@ const listSubtopics = tool(
   },
 );
 
+/**
+ * Renders retrieved passages for the model.
+ *
+ * The provenance line is the point: a passage that knows which document and
+ * which section it came from can be attributed, and the writing standard asks
+ * for claims to be supported. Chunks ingested before provenance existed simply
+ * omit it rather than inventing a citation.
+ */
+export function formatPassages(passages: RetrievedChunk[]): string {
+  return passages
+    .map((passage, index) => {
+      const where = [passage.source, passage.heading].filter(Boolean).join(" § ");
+      const label = where ? `passage ${index + 1} — ${where}` : `passage ${index + 1}`;
+      return `--- ${label} ---\n${passage.content}`;
+    })
+    .join("\n\n");
+}
+
 const retrieveContentTool = tool(
   async ({ topic, query }: { topic: string; query: string }) => {
     const resolved = resolveTopic(topic);
     if (!resolved) {
       return `Unknown topic "${topic}". Valid topics: ${TOPICS.map((t) => t.label).join(", ")}.`;
     }
-    const passages = retrieveContext(query, resolved.area);
+    const passages = await retrieveContext(query, resolved.area);
     if (passages.length === 0) {
       return `No stored material matched "${query}" within "${resolved.label}".`;
     }
-    return passages.map((p, i) => `--- passage ${i + 1} ---\n${p}`).join("\n\n");
+    return formatPassages(passages);
   },
   {
     name: "retrieve_content",
     description:
-      "Retrieve source material about a subtopic from the knowledge store. Use this to ground every explanation and article in real content — never invent facts you could look up here.",
+      "Retrieve source material about a subtopic from the knowledge store. Use this to ground every explanation and article in real content — never invent facts you could look up here. Each passage is labelled with the document it came from, so a claim can be attributed to a source rather than asserted.",
     schema: z.object({
       topic: z.string().describe("Topic id or label the subtopic belongs to."),
       query: z.string().describe("The subtopic or question to search for."),

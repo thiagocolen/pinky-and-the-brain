@@ -17,7 +17,8 @@ articles/
 *.db
 *.db-shm
 *.db-wal
-src/storage/vector-store.json
+src/storage/knowledge-store.json
+src/storage/embeddings.bin
 
 #
 
