@@ -51,7 +51,22 @@ environment-specific values before running Terraform.
 3. `npm run deploy` (`scripts/deploy.js`) builds the Docker image, pushes it to ECR,
    and runs Terraform to apply/update the AWS infrastructure.
 4. `npm run report-infra` (`scripts/report-infra.ps1`) audits the live AWS
-   infrastructure status.
+   infrastructure status and writes a timestamped Markdown report to
+   `infra-reports/`. It is read-only - it never creates or changes resources.
+
+   The script prompts for the regions to scan, listing every supported region so
+   any number of them can be picked by index (`1,3,5`), range (`1-4`), or name
+   (`sa-east-1,us-east-1`). Pressing ENTER with no selection scans **all** regions,
+   which is roughly 290 AWS API calls and takes a while - the prompt warns about
+   this before you commit to it.
+
+   To skip the prompt, pass `-Region sa-east-1,us-east-1` or `-AllRegions`. The
+   script also falls back to scanning all regions when stdin is not interactive,
+   so CI runs never hang on the prompt.
+
+   Failed AWS calls are printed to the console and collected into a *Failed AWS
+   Calls* section at the end of the report, so an empty section can be told apart
+   from a missing IAM permission.
 5. `npm run tail-logs` streams logs from the running cloud container.
 
 ## Required IAM permissions

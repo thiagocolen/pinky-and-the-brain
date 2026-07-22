@@ -5,15 +5,30 @@
     Queries AWS via the AWS CLI and generates a detailed report of the infrastructure,
     including network, database, container registry, compute, security, and secrets.
     Does not restrict queries by tags.
+
+    When no region is supplied the script prompts for an interactive region selection.
+    Choosing nothing scans every supported region, which issues a large number of AWS
+    API calls and takes a while.
 .PARAMETER Region
-    The AWS Region to query. If omitted, checks the .env file or defaults to 'sa-east-1'.
+    One or more AWS Regions to query (e.g. -Region sa-east-1,us-east-1). If omitted,
+    the script prompts for a selection.
+.PARAMETER AllRegions
+    Skips the interactive prompt and scans every supported region. Use this for
+    unattended/CI runs.
+.PARAMETER Profile
+    The AWS CLI profile to use. If omitted, resolves from AWS_PROFILE, then the .env
+    file, then 'default'.
 #>
 param(
-    [string]$Region = "",
+    [string[]]$Region = @(),
+    [switch]$AllRegions,
     [string]$Profile = ""
 )
 
 $ErrorActionPreference = "SilentlyContinue"
+
+# Collects every AWS CLI failure so they can be printed and appended to the report
+$apiErrors = @()
 
 # Resolve script directory and paths
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -34,19 +49,128 @@ Write-Host "       AWS Infrastructure Resource Reporter         " -ForegroundCol
 Write-Host "====================================================" -ForegroundColor Cyan
 
 # 1. Resolve AWS Regions to check
-$regionsToCheck = @(
+$availableRegions = @(
     "sa-east-1", "us-east-1", "us-east-2", "us-west-1", "us-west-2",
     "ca-central-1", "eu-central-1", "eu-west-1", "eu-west-2",
     "eu-west-3", "eu-north-1", "ap-northeast-1", "ap-northeast-2",
     "ap-northeast-3", "ap-southeast-1", "ap-southeast-2", "ap-south-1"
 )
 
-if (-not [string]::IsNullOrEmpty($Region)) {
-    $regionsToCheck = @($Region)
-    Write-Host "Checking only specified region: $Region" -ForegroundColor Green
-} else {
-    Write-Host "Checking all regions: $($regionsToCheck -join ', ')" -ForegroundColor Green
+# Roughly how many AWS CLI calls each region costs (17 fixed describes, plus one
+# extra per ECS cluster). Used to size the "this will take a while" alert - keep
+# in sync with the query loop below.
+$callsPerRegion = 17
+
+# Turns a raw answer ("1,3", "1-4", "sa-east-1", "all") into a region list.
+# Returns an empty array when nothing valid was recognised.
+function Resolve-RegionSelection {
+    param(
+        [string]$Answer,
+        [string[]]$AvailableRegions
+    )
+
+    $selected = @()
+    $tokens = $Answer -split '[,\s;]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+    foreach ($token in $tokens) {
+        $t = $token.Trim()
+
+        if ($t -match '^(all|\*)$') {
+            return $AvailableRegions
+        }
+
+        # Numeric range, e.g. 1-4. Checked before region names, which also contain '-'.
+        if ($t -match '^(\d+)\s*-\s*(\d+)$') {
+            $start = [int]$Matches[1]
+            $end = [int]$Matches[2]
+            if ($start -gt $end) { $start, $end = $end, $start }
+            for ($i = $start; $i -le $end; $i++) {
+                if ($i -ge 1 -and $i -le $AvailableRegions.Count) {
+                    $selected += $AvailableRegions[$i - 1]
+                } else {
+                    Write-Host "  Ignoring out-of-range index: $i" -ForegroundColor Yellow
+                }
+            }
+            continue
+        }
+
+        # Single index, e.g. 3
+        if ($t -match '^\d+$') {
+            $i = [int]$t
+            if ($i -ge 1 -and $i -le $AvailableRegions.Count) {
+                $selected += $AvailableRegions[$i - 1]
+            } else {
+                Write-Host "  Ignoring out-of-range index: $i" -ForegroundColor Yellow
+            }
+            continue
+        }
+
+        # Region name, e.g. sa-east-1
+        $match = $AvailableRegions | Where-Object { $_ -eq $t.ToLower() }
+        if ($match) {
+            $selected += $match
+        } else {
+            Write-Host "  Ignoring unknown region: $t" -ForegroundColor Yellow
+        }
+    }
+
+    return ($selected | Select-Object -Unique)
 }
+
+# Prints the region menu and reads a selection. Empty input means "scan everything".
+function Request-RegionSelection {
+    param([string[]]$AvailableRegions)
+
+    while ($true) {
+        Write-Host ""
+        Write-Host "Which AWS regions should be scanned?" -ForegroundColor Cyan
+        for ($i = 0; $i -lt $AvailableRegions.Count; $i++) {
+            Write-Host ("  [{0,2}] {1}" -f ($i + 1), $AvailableRegions[$i])
+        }
+        Write-Host ""
+        Write-Host "  Enter indexes (1,3,5), a range (1-4), region names (sa-east-1,us-east-1), or 'all'." -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "  !! ALERT: pressing ENTER with no selection scans ALL $($AvailableRegions.Count) regions." -ForegroundColor Yellow
+        Write-Host "  !! That is roughly $($AvailableRegions.Count * $callsPerRegion) AWS API calls and will take a while." -ForegroundColor Yellow
+        Write-Host ""
+
+        $answer = Read-Host "Regions (ENTER = all)"
+
+        if ([string]::IsNullOrWhiteSpace($answer)) {
+            Write-Host ""
+            Write-Host "No selection made - scanning ALL $($AvailableRegions.Count) regions. This will take a while." -ForegroundColor Yellow
+            return $AvailableRegions
+        }
+
+        $selected = @(Resolve-RegionSelection -Answer $answer -AvailableRegions $AvailableRegions)
+        if ($selected.Count -gt 0) {
+            return $selected
+        }
+
+        Write-Host "Nothing valid was recognised in '$answer'. Try again, or press ENTER to scan all regions." -ForegroundColor Red
+    }
+}
+
+if ($Region.Count -gt 0) {
+    $regionsToCheck = @(Resolve-RegionSelection -Answer ($Region -join ',') -AvailableRegions $availableRegions)
+    if ($regionsToCheck.Count -eq 0) {
+        Write-Host "Error: none of the regions passed via -Region are supported: $($Region -join ', ')" -ForegroundColor Red
+        exit 1
+    }
+} elseif ($AllRegions) {
+    Write-Host "-AllRegions supplied - scanning ALL $($availableRegions.Count) regions. This will take a while." -ForegroundColor Yellow
+    $regionsToCheck = $availableRegions
+} elseif ([Console]::IsInputRedirected) {
+    # Non-interactive host (CI, piped input): cannot prompt, so fall back to everything.
+    Write-Host "Non-interactive session - scanning ALL $($availableRegions.Count) regions. This will take a while." -ForegroundColor Yellow
+    $regionsToCheck = $availableRegions
+} else {
+    $regionsToCheck = @(Request-RegionSelection -AvailableRegions $availableRegions)
+}
+
+Write-Host ""
+Write-Host "Regions to scan ($($regionsToCheck.Count)): $($regionsToCheck -join ', ')" -ForegroundColor Green
+Write-Host "Estimated AWS API calls: ~$($regionsToCheck.Count * $callsPerRegion)" -ForegroundColor Gray
 
 # 2. Resolve AWS Profile (env -> param -> .env -> default)
 if (-not [string]::IsNullOrEmpty($env:AWS_PROFILE)) {
@@ -86,9 +210,14 @@ if (-not $awsCheck) {
 
 # Check AWS authentication/identity
 Write-Host "Checking AWS caller identity..." -ForegroundColor Gray
-$callerIdJson = aws sts get-caller-identity --output json 2>$null
+$callerIdOutput = aws sts get-caller-identity --output json 2>&1
+$callerIdJson = ($callerIdOutput | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) -join "`n"
+$callerIdErr = ($callerIdOutput | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { $_.ToString() }) -join "`n"
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($callerIdJson)) {
     Write-Host "Error: Failed to authenticate with AWS. Ensure you have valid AWS credentials loaded." -ForegroundColor Red
+    if (-not [string]::IsNullOrWhiteSpace($callerIdErr)) {
+        Write-Host "AWS CLI said: $callerIdErr" -ForegroundColor Red
+    }
     exit 1
 } else {
     $callerObj = $callerIdJson | ConvertFrom-Json
@@ -116,22 +245,56 @@ $allSecrets = @()
 $allSsmParams = @()
 $allLogGroups = @()
 
-# Helper to run AWS CLI command and parse JSON
+# Helper to run AWS CLI command and parse JSON.
+# Failures are never swallowed: the AWS CLI stderr is printed and recorded in
+# $apiErrors so a sparse report can be told apart from a missing permission.
 function Get-AwsResource {
     param(
         [string]$Command,
         [string]$QueryName
     )
     Write-Host "Fetching $QueryName..." -ForegroundColor Gray
-    $json = Invoke-Expression $Command 2>$null
-    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrEmpty($json)) {
-        try {
-            return $json | ConvertFrom-Json
-        } catch {
-            return $json
+
+    # The 2>&1 must live inside the expression string: applying it to Invoke-Expression
+    # itself does not capture the stderr of the native command it runs.
+    $output = Invoke-Expression "$Command 2>&1"
+    $exitCode = $LASTEXITCODE
+    $json = ($output | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) -join "`n"
+    $stdErr = ($output | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { $_.ToString() }) -join "`n"
+
+    if ($exitCode -ne 0 -or [string]::IsNullOrWhiteSpace($json)) {
+        $detail = if (-not [string]::IsNullOrWhiteSpace($stdErr)) {
+            $stdErr.Trim()
+        } elseif ($exitCode -ne 0) {
+            "AWS CLI exited with code $exitCode and produced no output."
+        } else {
+            "AWS CLI returned an empty response."
         }
+
+        Write-Host "  FAILED: $QueryName" -ForegroundColor Red
+        Write-Host "    Command: $Command" -ForegroundColor DarkGray
+        Write-Host "    $detail" -ForegroundColor Red
+
+        $script:apiErrors += [PSCustomObject]@{
+            Query   = $QueryName
+            Command = $Command
+            Detail  = $detail
+        }
+        return $null
     }
-    return $null
+
+    try {
+        return $json | ConvertFrom-Json
+    } catch {
+        Write-Host "  WARNING: $QueryName returned output that is not valid JSON." -ForegroundColor Yellow
+        Write-Host "    $($_.Exception.Message)" -ForegroundColor Yellow
+        $script:apiErrors += [PSCustomObject]@{
+            Query   = $QueryName
+            Command = $Command
+            Detail  = "Response was not valid JSON: $($_.Exception.Message)"
+        }
+        return $json
+    }
 }
 
 # Query resources across all specified regions
@@ -143,7 +306,7 @@ foreach ($r in $regionsToCheck) {
     # Check connectivity/access first by describing VPCs in this region
     $vpcs = Get-AwsResource "aws ec2 describe-vpcs --region $r --output json" "VPCs in $r"
     if ($null -eq $vpcs) {
-        Write-Host "Region $r is not accessible or returned no VPC config. Skipping." -ForegroundColor Yellow
+        Write-Host "Region $r is not accessible or returned no VPC config (see the error above). Skipping." -ForegroundColor Yellow
         continue
     }
 
@@ -564,17 +727,18 @@ if ($allSsmParams.Count -gt 0) {
     $report += "### SSM Parameters`n*No SSM Parameters found.*`n`n"
 }
 
-# IAM Roles (Global)
+# IAM Roles (Global) - every role in the account, unfiltered
 if ($roles -and $roles.Roles.Count -gt 0) {
     $report += "### IAM Roles`n"
-    $report += "| Role Name | Create Date | Arn |`n"
-    $report += "| --- | --- | --- |`n"
+    $report += "*All $($roles.Roles.Count) roles in the account (global, not region-scoped).*`n`n"
+    $report += "| Role Name | Create Date | Path | Arn |`n"
+    $report += "| --- | --- | --- | --- |`n"
     foreach ($role in $roles.Roles) {
-        if ($role.RoleName -match 'rag' -or $role.RoleName -match 'ec2' -or $role.RoleName -match 'penny' -or $role.RoleName -match 'pinky-and-the-brain') {
-            $report += "| $($role.RoleName) | $($role.CreateDate) | $($role.Arn) |`n"
-        }
+        $report += "| $($role.RoleName) | $($role.CreateDate) | $($role.Path) | $($role.Arn) |`n"
     }
     $report += "`n"
+} else {
+    $report += "### IAM Roles`n*No IAM Roles found.*`n`n"
 }
 
 # CloudWatch Log Groups
@@ -589,8 +753,34 @@ if ($allLogGroups.Count -gt 0) {
     $report += "`n"
 }
 
+# Failed AWS calls - so an empty section can be told apart from a denied permission
+$report += @"
+## 5. Failed AWS Calls
+
+"@
+
+if ($apiErrors.Count -gt 0) {
+    $report += "*$($apiErrors.Count) AWS CLI call(s) failed. Sections above may be incomplete - a missing resource here can mean a missing IAM permission, not an empty account.*`n`n"
+    $report += "| Query | Command | Error |`n"
+    $report += "| --- | --- | --- |`n"
+    foreach ($e in $apiErrors) {
+        $detail = ($e.Detail -replace '\r?\n', ' ' -replace '\|', '\|')
+        $report += "| $($e.Query) | ``$($e.Command)`` | $detail |`n"
+    }
+    $report += "`n"
+} else {
+    $report += "*All AWS CLI calls succeeded.*`n`n"
+}
+
 # Write report to file
 $report | Out-File -FilePath $reportPath -Encoding utf8
+
+Write-Host ""
+if ($apiErrors.Count -gt 0) {
+    Write-Host "$($apiErrors.Count) AWS CLI call(s) failed - see section 5 of the report for details." -ForegroundColor Yellow
+} else {
+    Write-Host "All AWS CLI calls succeeded." -ForegroundColor Green
+}
 Write-Host "Report successfully generated and saved to: $reportPath" -ForegroundColor Green
 Write-Host "Done!" -ForegroundColor Green
 Write-Host "====================================================" -ForegroundColor Cyan

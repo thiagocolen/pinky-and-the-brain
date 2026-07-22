@@ -20,7 +20,7 @@ sidebar_position: 7
 | `npm run ingest` | `node dist/scripts/ingest.js` | Rebuild the local vector store. |
 | `npm run ingest:remote` | `node dist/scripts/ingest.js --remote` | Rebuild the vector store from a remote source. |
 | `npm run deploy` | `node scripts/deploy.js` | Docker build, ECR push, and Terraform deploy. |
-| `npm run report-infra` | `scripts/report-infra.ps1` | PowerShell AWS infrastructure status audit. |
+| `npm run report-infra` | `scripts/report-infra.ps1` | PowerShell AWS infrastructure status audit. Prompts for which regions to scan. |
 | `npm run tail-logs` | `node scripts/tail-logs.js` | Stream cloud container logs. |
 | `npm run test-tracing` | `node scripts/test-tracing.js` | Verify LangSmith tracing connectivity. |
 | `npm run ls-studio` | `npx @langchain/langgraph-cli dev` | Run LangGraph Studio locally against `langgraph.json`. |
