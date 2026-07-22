@@ -42,11 +42,11 @@
 
    Both facet layers are cream at different strengths, never a dark tint.
    That is a contrast decision, not a taste one: a weave that only ever
-   *lightens* means the bare ramp is the worst case the ink ever faces, so
-   the 7.2:1 measured against the darkest stop is a floor rather than an
-   average. A 7% ink facet looked better here and cost the sibling
-   patb-cli banner its AA margin over red (4.8:1 -> 4.3:1), so neither
-   site has one. */
+   moves *away* from the text colour means the bare ramp is the worst case
+   the ink ever faces, so the 7.2:1 measured against the darkest stop is a
+   floor rather than an average. The sibling patb-cli banner follows the
+   same rule inverted — it is dark with cream lettering, so its facets
+   only darken. */
 .heroBanner::after {
   content: '';
   position: absolute;
