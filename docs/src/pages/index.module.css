@@ -3,18 +3,23 @@
  * and scoped locally.
  */
 
+/* The banner is the warm end of the brand: gold running down to orange, with
+   the dark navy ink on top. Dark-on-light is what the palette forces here —
+   the cream lettering the navy banner used manages 1.6:1 on gold, which is
+   not far off invisible. */
 .heroBanner {
-  --ifm-hero-text-color: var(--patb-color-cream);
+  --ifm-hero-text-color: var(--patb-color-ink);
   padding: 4rem 0;
   text-align: center;
   position: relative;
   overflow: hidden;
-  background-color: var(--patb-color-navy-darkest);
+  background-color: var(--patb-color-gold);
 }
 
 /* Animated glitch gradient: the layer is oversized (inset -20%) so the
    skew/translate keyframes never expose an edge, and the hue-rotate runs
-   on its own filter so it doesn't wash out the dot pattern or content. */
+   on its own filter so it doesn't wash out the pattern or content. The
+   darkest stop is orange, which holds 7.2:1 against the ink. */
 .heroBanner::before {
   content: '';
   position: absolute;
@@ -23,9 +28,9 @@
   pointer-events: none;
   background: linear-gradient(
     45deg,
-    var(--patb-color-navy-darkest) 0%,
-    var(--patb-color-navy) 50%,
-    var(--patb-color-navy-light) 100%
+    var(--patb-color-gold) 0%,
+    var(--patb-color-amber) 50%,
+    var(--patb-color-orange) 100%
   );
   background-size: 100% 100%;
   animation: heroGradientGlitch 8s ease alternate infinite;
@@ -33,7 +38,15 @@
 
 /* Diagonal interlocking-triangle pattern (magicpattern-style "pinwheel"
    weave). Every stop is transparent-backed, not a solid second color, so
-   the animated gradient in ::before keeps showing through underneath. */
+   the animated gradient in ::before keeps showing through underneath.
+
+   Both facet layers are cream at different strengths, never a dark tint.
+   That is a contrast decision, not a taste one: a weave that only ever
+   *lightens* means the bare ramp is the worst case the ink ever faces, so
+   the 7.2:1 measured against the darkest stop is a floor rather than an
+   average. A 7% ink facet looked better here and cost the sibling
+   patb-cli banner its AA margin over red (4.8:1 -> 4.3:1), so neither
+   site has one. */
 .heroBanner::after {
   content: '';
   position: absolute;
@@ -42,12 +55,12 @@
   pointer-events: none;
   background-image: linear-gradient(
       135deg,
-      rgba(255, 248, 232, 0.10) 25%,
+      rgba(255, 248, 232, 0.30) 25%,
       transparent 25%
     ),
-    linear-gradient(225deg, rgba(255, 192, 24, 0.08) 25%, transparent 25%),
-    linear-gradient(315deg, rgba(255, 248, 232, 0.10) 25%, transparent 25%),
-    linear-gradient(45deg, rgba(255, 192, 24, 0.08) 25%, transparent 25%);
+    linear-gradient(225deg, rgba(255, 248, 232, 0.12) 25%, transparent 25%),
+    linear-gradient(315deg, rgba(255, 248, 232, 0.30) 25%, transparent 25%),
+    linear-gradient(45deg, rgba(255, 248, 232, 0.12) 25%, transparent 25%);
   background-position: -14px 0, -14px 0, 0 0, 0 0;
   background-size: 28px 28px;
 }
@@ -57,9 +70,25 @@
   z-index: 2;
 }
 
+/* Infima's secondary button is near-white, which dissolves into a gold
+   banner. Navy is the other half of the same logo, so the call to action
+   borrows it back and carries the cream lettering the banner gave up. */
+.heroBanner .buttons :global(.button) {
+  background-color: var(--patb-color-navy);
+  border-color: var(--patb-color-navy);
+  color: var(--patb-color-cream);
+}
+
+.heroBanner .buttons :global(.button:hover),
+.heroBanner .buttons :global(.button:focus-visible) {
+  background-color: var(--patb-color-navy-darkest);
+  border-color: var(--patb-color-navy-darkest);
+  color: var(--patb-color-cream);
+}
+
 /* hue-rotate is kept to a narrow +-8deg swing (not a full 0-360 sweep) so
-   the glitch motion stays inside the patb-color navy family instead of
-   cycling through off-brand purple/orange/green. */
+   the glitch motion stays inside the patb-color warm family instead of
+   cycling through off-brand green/pink. */
 @keyframes heroGradientGlitch {
   0%,
   100% {

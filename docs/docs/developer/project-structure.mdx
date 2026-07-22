@@ -23,7 +23,8 @@ pinky-and-the-brain/
       agent.ts                        # createDeepAgent assembly (model + tools + prompt)
       graph.ts                        # runGraphWorkflow compatibility layer
       persona.ts                      # The Brain's voice & catchphrases
-      prompts.ts                      # Journey state machine & teaching loop
+      prompts.ts                      # Writing standard, journey state machine & teaching loop
+      layout.ts                       # Article layout marks → the blog's MDX (pure transforms)
       tools.ts                        # Topics, subtopics, retrieval, article files
     protocol/                         # ACP JSON-RPC standard parsing
       acp-server.ts                   # ACP protocol handler
@@ -38,6 +39,10 @@ pinky-and-the-brain/
       logger.ts                       # Centralized console and file logger (agent.log & stderr)
       messages.ts                     # LangChain message helper functions
       model.ts                        # LLM factory (Anthropic Claude only)
+      blog-mcp.ts                     # Client session against the blog's own `articles` MCP server
+      image-gen.ts                    # Cover & figure generation (soft-failing)
+      illustration-styles.ts          # The style catalogue and the per-article pick
+      session.ts                      # Stable thread ids for MCP callers
     tests/
       unit/                           # Vitest unit tests
       integration/                    # Vitest integration tests
@@ -59,14 +64,20 @@ pinky-and-the-brain/
   configuration on startup, then delegate all actual work to `runGraphWorkflow()` from
   `src/agents/graph.ts`. They differ only in transport (stdio JSON-RPC, terminal REPL,
   HTTP/SSE, MCP stdio) and in how they format the final response.
-- **`agents/`** contains the agent itself: the persona and journey prompts
-  (`persona.ts`, `prompts.ts`), the tools that supply every fact (`tools.ts`), the
-  Deep Agent assembly (`agent.ts`), and the `runGraphWorkflow()` compatibility layer
-  (`graph.ts`).
+- **`agents/`** contains the agent itself: the persona, writing standard and journey
+  prompts (`persona.ts`, `prompts.ts`), the tools that supply every fact and perform
+  every delivery (`tools.ts`), the article layout renderer (`layout.ts`), the Deep
+  Agent assembly (`agent.ts`), and the `runGraphWorkflow()` compatibility layer
+  (`graph.ts`). `layout.ts` is deliberately pure — it does no I/O and knows nothing
+  about MCP or image generation — so the interesting cases are cheap to test.
 - **`protocol/`** contains the ACP-specific JSON-RPC request/response handling used only
   by `src/index.ts`.
 - **`storage/`** contains the two persistence backends: a local SQLite checkpointer used
   by every entrypoint, and an S3 wrapper used for cloud state storage (with a
   transparent in-memory fallback).
-- **`utils/`** contains cross-cutting helpers (logging, LangChain message type guards,
-  LLM client construction) with no dependency on any specific entrypoint or protocol.
+- **`utils/`** contains cross-cutting helpers with no dependency on any specific
+  entrypoint or protocol: logging, LangChain message type guards, LLM client
+  construction, MCP thread ids, and the publishing side — `blog-mcp.ts` drives the
+  blog's own `articles` server, while `image-gen.ts` and `illustration-styles.ts`
+  produce the pictures. Everything on that publishing side fails softly: a missing
+  image costs a picture, never the article.

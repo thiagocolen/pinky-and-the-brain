@@ -43,6 +43,22 @@
   --patb-color-navy: #206090;
   --patb-color-navy-light: #2a7dbc;
 
+  /* The warm ramp, for the hero banner. Only the two ends are sampled from the
+     logo (gold, and the red that the sibling patb-cli hero runs down to); the
+     amber and orange between them are interpolated across that span, so the
+     ramp stays inside the badge's own warm family instead of introducing a
+     third hue. The two sites share these tokens and each takes a different
+     slice: this one runs gold -> orange, patb-cli runs orange -> red. */
+  --patb-color-amber: #f9a814;
+  --patb-color-orange: #f5920f;
+
+  /* Ink for text sitting on the warm ramp. Cream is unreadable there — 1.6:1
+     against gold — so this is the brand navy darkened until the *darkest* stop
+     of either hero ramp clears WCAG AA against it. It measures 7.2:1 on this
+     site's darkest stop (orange) and 4.8:1 on patb-cli's (red), which is what
+     fixes how dark it has to be: red is the constraint, not gold. */
+  --patb-color-ink: #0a1f2e;
+
   --ifm-background-color: var(--patb-color-cream);
   --ifm-blockquote-border-color: var(--patb-color-gold);
 }
