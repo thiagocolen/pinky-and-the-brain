@@ -4,9 +4,9 @@ sidebar_position: 9
 
 # Troubleshooting
 
-### `Configuration validation failed: Missing critical environment variable: Either OPENAI_API_KEY or GOOGLE_API_KEY must be provided`
+### `Configuration validation failed: Missing critical environment variable: ANTHROPIC_API_KEY must be provided`
 
-No LLM provider key was found. Set `GOOGLE_API_KEY` or `OPENAI_API_KEY` in your `.env`
+Anthropic is the only supported LLM provider. Set `ANTHROPIC_API_KEY` in your `.env`
 file or environment, then restart the process (see
 [Configuration](/docs/end-user/configuration)).
 
@@ -22,10 +22,15 @@ Every route except `/` and `/health` requires an `X-API-Key` HTTP header equal t
 configured `PATBA_API_KEY`. Double-check the header name (`X-API-Key`, case-insensitive)
 and value.
 
-### `No LLM API keys provided. Please set OPENAI_API_KEY or GOOGLE_API_KEY.`
+### `No Anthropic API key provided. Please set ANTHROPIC_API_KEY to use the agent.`
 
-Thrown by `createChatModel()` in `src/utils/model.ts` when a graph node tries to invoke
-an LLM but no key is configured. Configure at least one provider key.
+Thrown by `createChatModel()` in `src/utils/model.ts` when the agent is built but no
+Anthropic key is configured. There is no fallback provider — set `ANTHROPIC_API_KEY`.
+
+### `400 ... \`temperature\` is deprecated for this model`
+
+Claude Sonnet 5 rejects the `temperature` parameter, so `createChatModel()` does not
+send one. If you reintroduce it, expect this error.
 
 ### `SLACK_BOT_TOKEN is not set. Slack integration is disabled.`
 
@@ -41,12 +46,25 @@ logs a warning and falls back to an in-memory mock store that does not persist a
 process restarts. This is expected for local development; local SQLite checkpoints are
 unaffected.
 
-### The agent gives a generic "no specialist agent available" answer
+### The agent keeps steering me back to its topic menu
 
-`detectArea()` in `src/agents/the-brain.ts` only routes to a specialist when your
-message contains one of a fixed set of keywords (see the [FAQ](/docs/end-user/faq) for
-the full list of topics and keywords). Rephrase your question using terms closer to the
-supported domains (e.g. "AWS", "Conway", "IELTS", "interview").
+The Brain only teaches and writes from its own knowledge store, and it will not invent
+material outside it. If your request falls outside the four topics (see the
+[FAQ](/docs/end-user/faq)), it will say so and offer the menu again. Pick a topic, then a
+subtopic, and it will proceed.
+
+### The agent says it found no material for a subtopic
+
+Retrieval searches `src/storage/knowledge-store.json` with BM25, fused with vector
+similarity when embeddings are available, so it tolerates paraphrase far better than
+it used to — but the store only covers four areas, and nothing outside them exists to
+find. Rephrase using terms closer to the stored material (e.g. "Conway", "IELTS",
+"EC2"). If the store is missing or empty, run `npm run ingest` to regenerate it.
+
+If answers seem to miss the point of a question, check whether embeddings were built:
+the startup log reports `Loaded N vectors` when they were, and retrieval silently
+falls back to BM25 alone when they were not. See
+[Retrieval](/docs/developer/retrieval).
 
 ### `npm run mcp` / `npm run start` prints unexpected extra text on stdout
 

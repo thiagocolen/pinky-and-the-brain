@@ -1,0 +1,231 @@
+---
+sidebar_position: 4
+title: Retrieval (RAG)
+description: How The Brain finds the source material it teaches and writes from — BM25, embeddings, and how the two are fused.
+---
+
+# Retrieval (RAG)
+
+Everything The Brain says about a subject is supposed to come from the knowledge
+store rather than from the model's memory. Retrieval is the component that decides
+*which* of the 5,166 stored passages it gets to see, which makes it the quietest
+place in the system for a failure to hide: a retriever that returns the wrong
+passages does not throw, it just produces a worse article.
+
+This page is about that component — what it does now, what it used to do, and how
+the difference was measured.
+
+## Is this really RAG?
+
+Yes, and it is worth being precise about why, because the term now carries an
+implementation connotation this system does not satisfy.
+
+RAG is *retrieve from an external corpus at inference time, then condition
+generation on what came back*. Every structural piece is here:
+
+| Component | Where |
+| --- | --- |
+| External corpus (non-parametric memory) | `src/storage/knowledge-store.json` — 5,166 chunks across four areas |
+| Offline chunk + index pipeline | `src/scripts/ingest.ts` (`npm run ingest`) |
+| Retriever | `retrieveContext` (`src/agents/tools.ts`) over `src/utils/retrieval.ts` |
+| Generator conditioned on the result | The Brain, via the `retrieve_content` tool |
+| Grounding discipline | `JOURNEY_PROMPT` — teach only from what retrieval returned |
+
+It is also **agentic** RAG rather than pipeline RAG. Retrieval is not a fixed
+pre-step that runs before the model does; it is a tool the model calls, with a
+query it composes itself and an `area` it selects as a metadata filter. The model
+decides when it needs material and what to ask for.
+
+What it is *not* is a vector database. There is no ANN index and no external
+service — similarity is a linear scan over quantised vectors held in memory,
+which is the right shape at five thousand chunks and would not be at five million.
+
+## What retrieval used to do, and why it was replaced
+
+The original retriever scored a chunk by counting how many whitespace-separated
+query terms appeared inside it as substrings. Every defect below was measured
+against the real store rather than guessed at, and each is now a test in
+`src/tests/unit/retrieval.test.ts`.
+
+Take a question a user would actually type — *"How does the Game of Life work?"*
+
+```text
+terms: [how, does, the, game, life, work?]
+```
+
+- **`work?` could never match `work`.** Punctuation was never stripped, so the
+  most specific word in the question was dead weight.
+- **`how`, `does` and `the` all scored**, being longer than the two-character
+  cutoff. Eleven of the 68 cellular-automata chunks contain all three regardless
+  of subject, so three of the six points were free.
+- **Two-character terms were discarded** — `S3`, `AI`, `UI` — while `the` was kept.
+- **`String.includes` ignores word boundaries**: `cell` scored inside
+  `excellent`, `ant` inside `important`.
+- **No stemming**, so `automaton` missed `automata` — the plural in the name of
+  an entire topic area.
+- **Every match counted once**, so a passage *about* a subject ranked level with
+  one mentioning it in passing, and a long chunk beat a short one simply by
+  offering more surface to hit.
+- **Ties broke on position in the file.** That query produced 6 chunks tied at
+  score 5 and 9 tied at 4, against a limit of 10 — so five of nine
+  equally-ranked chunks were dropped by the order they happened to be written
+  to disk.
+
+## The retriever now
+
+### Lexical: BM25
+
+`src/utils/retrieval.ts` is pure — no I/O, no config, no knowledge of where
+chunks come from — for the same reason `src/agents/layout.ts` is: the
+interesting cases are all edge cases, and edge cases are cheap to test when
+nothing has to be mocked.
+
+- `tokenize()` splits on non-alphanumerics, so punctuation disappears and terms
+  are compared whole. Two-character tokens survive; stopwords do not.
+- `STOPWORDS` is deliberately short. Aggressive lists eat domain vocabulary —
+  `state`, `set` and `type` are stopwords in some standard lists and all
+  meaningful here, so there is a test asserting they stay searchable.
+- `stem()` folds plurals and stops. A full Porter stemmer conflates more but
+  mangles technical vocabulary (`policies` → `polici`), and over-stemming fails
+  *silently*, returning confident matches for words nobody asked about.
+- `search()` scores with BM25: term frequency saturates, rare terms outweigh
+  common ones, and length is normalised. The IDF is the `1 +` variant, which
+  cannot go negative — the textbook form lets a term appearing in over half the
+  corpus actively subtract from a score.
+- Ties break on chunk `id`, never on position.
+
+### Semantic: embeddings
+
+Vectors are built at ingest time by `gemini-embedding-001` and stored in
+`src/storage/embeddings.bin`.
+
+Three decisions in `src/utils/embeddings.ts` are worth knowing:
+
+- **Vectors are L2-normalised before use.** `gemini-embedding-001` is a
+  Matryoshka model, so requesting fewer than its native 3,072 dimensions returns
+  a *truncated* vector — and truncation destroys the unit norm the full vector
+  had. Skipping this makes cosine similarity silently wrong: longer vectors just
+  win.
+- **They are quantised to one byte per dimension.** At 256 dimensions that is
+  1.3 MB across the corpus rather than 5 MB at float32, in a file baked into the
+  container image and held in memory. The precision lost sits far below the
+  noise floor of the similarity itself.
+- **Documents and queries are embedded differently** (`RETRIEVAL_DOCUMENT` vs
+  `RETRIEVAL_QUERY`). Asymmetric models place a question and its answer in
+  deliberately different regions of the space, and saying which one you are
+  embedding is most of the benefit of using a retrieval model over a generic one.
+
+### Fusing the two
+
+Neither retriever subsumes the other. BM25 matches the words the reader actually
+typed; vectors reach a passage about *underpopulation* from a question about *how
+cells die*, which shares no word with it.
+
+The results are combined by **reciprocal rank fusion**, which reads only the
+*rank* of a result and never its score. That is the point: a BM25 score and a
+cosine similarity are not in the same units and cannot be added or averaged
+without inventing a conversion between them. Rank is the one thing they share.
+
+Each retriever is asked for three times the final limit, because fusion needs
+disagreement to work with — a passage ranked 12th lexically and 2nd semantically
+should be able to surface, and cannot if BM25 was only ever asked for ten.
+
+:::note Retrieval never depends on a key
+Every path degrades to BM25 alone: no `GEMINI_API_KEY`, no embeddings file, a
+dimension mismatch, or a failed embedding call. Lexical retrieval is a complete
+retriever, so the vectors improve an answer rather than gate one. This is the
+same posture as [cover-image generation](./agent-flow#adding-instructions-about-the-illustrations).
+:::
+
+## Chunk identity and provenance
+
+Each chunk carries an `id` derived from its own content
+(`sha256(content).slice(0, 12)`), not its position in the array.
+
+This matters more than it sounds. The store is rebuilt from source, and an array
+index changes the moment a paragraph is added anywhere earlier in the corpus —
+which would silently invalidate both the evaluation fixture and every stored
+embedding. Content addressing means re-ingesting after an edit re-embeds only
+the text that actually changed, and the ingest pipeline reuses the rest.
+
+Chunks also carry `source` (the corpus-relative file) and `heading` (the nearest
+preceding markdown heading), which `retrieve_content` prints above each passage:
+
+```text
+--- passage 1 — cellular-automata/references/lenia.md § Growth mappings ---
+```
+
+That is what makes it possible for an article to attribute a claim rather than
+merely assert one, which the [Article Writing Guide](./article-writing-guide)
+has always asked for.
+
+## Measuring it
+
+`src/tests/fixtures/retrieval-eval.json` holds twenty queries phrased the way
+someone would actually ask them, each labelled by hand with the chunks that
+genuinely answer it — candidates were surfaced from the store, then read and
+kept or discarded one at a time. Passages are listed only if they *answer* the
+question, not if they merely mention the subject.
+
+```bash
+npm run eval:retrieval
+```
+
+| retriever | recall@10 | MRR | nDCG@10 | queries returning nothing relevant |
+| --- | --- | --- | --- | --- |
+| legacy (substring) | 0.597 | 0.499 | 0.461 | 4 of 20 |
+| bm25 (lexical) | 0.800 | 0.764 | 0.714 | 1 of 20 |
+| **hybrid (bm25 + vectors)** | **0.900** | **0.899** | **0.847** | **0 of 20** |
+
+- **recall@10** — how much of the labelled material was found at all.
+- **MRR** — how far down the first useful passage sits.
+- **nDCG@10** — whether the useful passages are near the top rather than merely present.
+
+The last column is the one that mattered most in practice: four of twenty
+questions previously returned **ten passages containing nothing useful**, and the
+agent had no way to know. It would then write an article from them.
+
+The legacy retriever is reproduced inside `scripts/eval-retrieval.js` rather than
+kept alive in `src/`. A baseline has to stay runnable to remain a baseline, but
+nothing should be able to select it by accident.
+
+## Configuration
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `RETRIEVAL_MODE` | `hybrid` | `lexical` uses BM25 alone. Hybrid already falls back on its own, so set this only to drop the per-turn embedding call deliberately, or to compare. |
+| `GEMINI_EMBEDDING_MODEL` | `gemini-embedding-001` | Also embeds queries at run time. |
+| `GEMINI_EMBEDDING_DIM` | `256` | Changing this invalidates every stored vector; the agent notices and ignores them rather than comparing different lengths. Re-run `npm run ingest`. |
+| `CURATED_CONTENT_PATH` | sibling `patb-rag-curated-content` | Where ingest reads source documents. Previously three hard-coded paths, the last an absolute Windows one — so ingest worked on exactly one machine. |
+
+## Rebuilding the store
+
+```bash
+npm run build && npm run ingest
+```
+
+Ingest walks the curated corpus, splits documents into paragraphs, records each
+chunk's source and heading, collapses duplicates by id, and embeds anything that
+does not already have a vector.
+
+:::tip Embedding is resumable
+The quota counts each *text*, not each request, so a batch of 100 spends 100 of
+the 3,000-per-minute allowance. Ingest paces itself and retries on a 429, but a
+run that still gives up keeps the vectors it built — re-running resumes, because
+reuse is keyed on the content-addressed id. This is not hypothetical: the first
+full run stopped at 3,000 of 5,166, and the second finished the remaining 2,166.
+:::
+
+## Where to change things
+
+| Change | Where |
+| --- | --- |
+| Scoring, tokenising, stemming, stopwords | `src/utils/retrieval.ts` — pure, no I/O |
+| Embedding model, quantisation, file format | `src/utils/embeddings.ts` |
+| How retrievers are combined, how many passages | `retrieveContext` in `src/agents/tools.ts` |
+| How passages are presented to the model | `formatPassages` in `src/agents/tools.ts` |
+| Chunking, provenance, what gets ingested | `src/scripts/ingest.ts` |
+| The queries retrieval is judged on | `src/tests/fixtures/retrieval-eval.json` |
+
+Anything touching the first three should be followed by `npm run eval:retrieval`,
+and the numbers quoted rather than described.

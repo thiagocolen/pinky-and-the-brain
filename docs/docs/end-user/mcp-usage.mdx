@@ -5,8 +5,15 @@ sidebar_position: 5
 # MCP Usage
 
 The service can run as a **Model Context Protocol (MCP)** server (`src/mcp.ts`),
-exposing the agent workflow as a tool that MCP-compatible clients (such as Claude
-Desktop) can call.
+exposing the agent workflow as a tool that MCP-compatible clients (such as Claude Code
+and Claude Desktop) can call.
+
+:::tip Which protocol?
+MCP is how Claude Code and Claude Desktop reach out to external tools — use it for
+those. The [ACP server](./acp-usage.mdx) is for editors such as Zed, which act as ACP
+*clients* driving this service as an agent. Claude Code is itself an ACP agent, not an
+ACP client, so it cannot connect to the ACP server.
+:::
 
 ## Starting the MCP server
 
@@ -23,14 +30,114 @@ The server exposes a single tool:
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `prompt` | `string` | yes | The instruction or query for the agent workspace. |
-| `agentName` | `string` | no | The agent node to invoke. Defaults to `the-brain`. Also accepts `brain`, `supervisor`, `developer`, `writer`, `instructor`, `specialist`, `publisher` for compatibility. |
-| `threadId` | `string` | no | Persistent thread ID to isolate state across calls. A random `mcp-session-<random>` ID is generated if omitted. |
+| `prompt` | `string` | yes | The next message for The Brain — a greeting, a menu choice, an answer to its question, or an instruction. |
+| `agentName` | `string` | no | The agent to invoke. Defaults to `the-brain`; `brain` and `supervisor` are accepted aliases. |
+| `threadId` | `string` | no | Omit this. All calls share one conversation by default. Pass an ID only to start or resume a separate, isolated conversation. |
 
 The tool returns a single `text` content block with the agent's final response, or an
 `isError: true` result with the error message if the workflow throws.
 
-## Configuring an MCP client
+### The conversation is multi-turn
+
+`run_agent` is not a one-shot query. The Brain leads a journey — choose a topic, choose
+a subtopic, then either learn it or have an article written — and ends every reply with
+a question. The client is expected to call the tool repeatedly, relaying the user's
+answer each time.
+
+That only works because state persists between calls. Every call without an explicit
+`threadId` runs on one thread per server process (`mcp-session-<uuid>`, see
+`src/utils/session.ts`), so the journey advances instead of restarting. Passing a fresh
+`threadId` on each call would strand the conversation on the topic menu forever.
+
+Restarting the MCP server starts a new journey. To resume an old one, pass its
+`threadId` explicitly — checkpoints survive restarts in `state.db`.
+
+## Claude Code
+
+Build first — every registration path below points at `dist/mcp.js`:
+
+```bash
+npm run build
+```
+
+### Option 1 — the project's `.mcp.json` (recommended)
+
+The repository ships a project-scoped `.mcp.json` at its root, so the server is already
+registered for anyone working in this checkout:
+
+```json
+{
+  "mcpServers": {
+    "pinky-and-the-brain": {
+      "command": "node",
+      "args": ["${CLAUDE_PROJECT_DIR:-.}/dist/mcp.js"]
+    }
+  }
+}
+```
+
+Claude Code prompts for approval the first time it loads a project-scoped server. Run
+`claude mcp reset-project-choices` to reset that decision.
+
+:::note
+`${CLAUDE_PROJECT_DIR}` needs the `:-.` default. The variable is set in the *server's*
+environment rather than Claude Code's own, so the bare form does not expand inside a
+project-scoped `.mcp.json`.
+:::
+
+### Where the credentials come from
+
+There is deliberately **no `env` block**. `ANTHROPIC_API_KEY` is the only credential the
+MCP server needs, and it comes from **`.env` at the project root**, loaded by
+`src/config.ts`. That path is derived from the compiled file's own location, so it
+resolves no matter what working directory the server is spawned in.
+
+Do not add an `env` block to pass it through instead. MCP clients do not hand a spawned
+server the full parent environment — the reference SDK passes only a safe allowlist
+(`PATH`, `HOME`/`USERPROFILE`, and a handful more), so a `"${ANTHROPIC_API_KEY}"` entry
+resolves to nothing unless you have also exported the key to your shell. Claude Code
+would then report a missing-variable warning in `claude mcp list` and pass the literal
+`${ANTHROPIC_API_KEY}` text through. Reading `.env` sidesteps the whole question.
+
+:::note
+`PATBA_API_KEY` is **not** required by this entrypoint. It is the REST API's `X-API-Key`
+secret, so `src/mcp.ts` calls `validateConfig({ requirePatbaApiKey: false })` — an unused
+secret should not be a startup dependency, least of all one the client's filtered
+environment would strip anyway. `npm run server` still requires it.
+:::
+
+### Option 2 — `claude mcp add`
+
+To register it outside this checkout, or privately to your machine:
+
+```bash
+claude mcp add --transport stdio pinky-and-the-brain -- node /absolute/path/to/dist/mcp.js
+```
+
+No `--env` flags are needed: the server reads `ANTHROPIC_API_KEY` from the project's
+`.env`, as described above. If you do pass credentials this way, note that `--env`
+accepts multiple `KEY=value` pairs, so the server name must not come directly after it —
+the CLI would read the name as another pair and reject it. Put another option between
+them:
+
+```bash
+claude mcp add --env SOME_KEY=value --transport stdio myserver -- node server.js
+```
+
+Add `--scope user` to make it available across all your projects. Everything after `--`
+is passed to the server untouched.
+
+### Verifying
+
+```bash
+claude mcp list
+```
+
+The server should appear as connected. Then ask Claude to greet The Brain and pick a
+topic — if the second call returns the topic menu again instead of a subtopic list,
+state is not persisting between calls.
+
+## Configuring other MCP clients
 
 Register the server with your MCP client using the compiled entrypoint, for example:
 
@@ -41,7 +148,7 @@ Register the server with your MCP client using the compiled entrypoint, for exam
       "command": "node",
       "args": ["/absolute/path/to/pinky-and-the-brain/dist/mcp.js"],
       "env": {
-        "GOOGLE_API_KEY": "your_gemini_api_key_here",
+        "ANTHROPIC_API_KEY": "your_anthropic_api_key_here",
         "PATBA_API_KEY": "your_secret_api_key_here"
       }
     }

@@ -1,5 +1,5 @@
 ---
-sidebar_position: 6
+sidebar_position: 9
 ---
 
 # Contributing
@@ -53,7 +53,9 @@ frontmatter to control ordering within a section.
   files are `.ts`.
 - Configuration is centralized in `src/config.ts` - add new environment variables to
   the Zod schema there rather than reading `process.env` directly elsewhere.
-- New specialist domains should follow the existing pattern in
-  `src/agents/specialists.ts`: add a keyword branch to `detectArea()` in
-  `the-brain.ts`, a new graph node wrapping `runSpecialistNode()`, and register the
-  node + routing edges in `src/agents/graph.ts`.
+- New topics are data, not code: ingest the material under a new `area` (see
+  `src/scripts/ingest.ts`), then add an entry to the `TOPICS` registry in
+  `src/agents/tools.ts`. The agent picks it up from there — no new nodes or routing.
+- Keep facts in tools and behaviour in prompts. The agent must never invent topics,
+  subtopics, or material it could retrieve; if you find yourself hardcoding content into
+  a prompt, it probably belongs in the knowledge store.

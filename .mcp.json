@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "pinky-and-the-brain": {
+      "command": "node",
+      "args": ["${CLAUDE_PROJECT_DIR:-.}/dist/mcp.js"]
+    }
+  }
+}

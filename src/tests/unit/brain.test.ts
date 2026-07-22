@@ -1,115 +1,229 @@
-import { describe, it, expect, vi } from "vitest";
-import { HumanMessage, AIMessage } from "@langchain/core/messages";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import fs from "fs";
+import path from "path";
+import os from "os";
 
-// Mock the OpenAI model to avoid real rate limits and network calls
-vi.mock("@langchain/openai", () => {
-  return {
-    ChatOpenAI: vi.fn().mockImplementation(() => {
-      return {
-        invoke: vi.fn().mockImplementation(async (messages: any[]) => {
-          // Identify which node is invoking the LLM based on system message content
-          const systemMsg = messages.find(m => m._getType() === "system" || m.constructor.name === "SystemMessage");
-          const systemContent = systemMsg ? String(systemMsg.content) : "";
+vi.mock("../../config.js", () => ({
+  config: {
+    anthropicApiKey: "mock-key-for-testing",
+    anthropicModel: "claude-sonnet-5",
+    patbaApiKey: "mock-key-for-testing",
+    blogRepoPath: "/nonexistent/blog-checkout",
+    geminiApiKey: "",
+    geminiImageModel: "gemini-3.1-flash-lite-image",
+    // No key, so `embedQuery` returns null and retrieval falls back to BM25.
+    // These tests are about the lexical retriever; the hybrid path is covered
+    // in retrieval.test.ts through the embedder seam, without a network.
+    retrievalMode: "hybrid",
+    geminiEmbeddingModel: "gemini-embedding-001",
+    geminiEmbeddingDim: 256,
+  },
+  projectRoot: process.cwd(),
+}));
 
-          if (systemContent.includes("routing Pinky's query")) {
-            return {
-              content: `The same thing we do every night, Pinky—try to take over the world! Let us consult the archives.`,
-            };
-          } else if (systemContent.includes("specialist agent available") || systemContent.includes("Explain your capabilities")) {
-            return {
-              content: `The same thing we do every night, Pinky—try to take over the world!\nI must inform you that no specialist agent is available for your specific query. However, my supreme intellect has developed four specialized areas of expertise:
-- **aws-tutor**: AWS Certified Cloud Practitioner prep.
-- **cellular-automata**: Conway's Game of Life.
-- **english-certification-instructor**: IELTS, TOEFL, Cambridge coach.
-- **job-technical-interviewer**: Frontend mock job interview simulator.`,
-            };
-          } else {
-            // Specialist mock response
-            return {
-              content: `Here is the lesson overview.\nIt is a cellular automaton.`,
-            };
-          }
-        }),
-      };
-    }),
-  };
+import {
+  TOPICS,
+  resolveTopic,
+  retrieveContext,
+  extractSubtopics,
+  resolveArticlePath,
+  loadVectorStore,
+  formatPassages,
+  __setVectorStore,
+  __resetVectorStore,
+} from "../../agents/tools.js";
+import { chunkId } from "../../utils/retrieval.js";
+import { BRAIN_SYSTEM_PROMPT } from "../../agents/prompts.js";
+
+describe("Topic registry", () => {
+  it("exposes the four topics of expertise", () => {
+    expect(TOPICS.map((t) => t.id).sort()).toEqual([
+      "aws",
+      "cellular-automata",
+      "english",
+      "interview",
+    ]);
+  });
+
+  it("maps every topic to an area present in the real vector store", () => {
+    const areas = new Set(loadVectorStore().map((c) => c.area));
+    for (const topic of TOPICS) {
+      expect(areas.has(topic.area), `missing area ${topic.area}`).toBe(true);
+    }
+  });
+
+  it("resolves a topic by id, label, and partial name", () => {
+    expect(resolveTopic("aws")?.area).toBe("aws-tutor");
+    expect(resolveTopic("Cellular Automata")?.id).toBe("cellular-automata");
+    expect(resolveTopic("english for certifications")?.id).toBe("english");
+  });
+
+  it("returns undefined for an unknown topic", () => {
+    expect(resolveTopic("bread baking")).toBeUndefined();
+  });
 });
 
-// Mock config to ensure openaiApiKey is set so mocks trigger instead of raw code mock fallback
-vi.mock("../../config.js", () => {
-  return {
-    config: {
-      openaiApiKey: "mock-key-for-testing",
-      patbaApiKey: "mock-key-for-testing",
-    },
-    projectRoot: process.cwd(),
-  };
-});
+describe("retrieveContext", () => {
+  afterEach(() => {
+    __resetVectorStore();
+  });
 
-// Import new agent logic
-import { theBrainNode } from "../../agents/the-brain.js";
-import { retrieveContext, cellularAutomataNode } from "../../agents/specialists.js";
-import { AgentWorkspaceState } from "../../agents/types.js";
-
-describe("The Brain & Specialist Agent Unit Tests", () => {
-  it("should retrieve context correctly from the vector store for aws-tutor", () => {
-    const results = retrieveContext("DynamoDB and IAM policies", "aws-tutor");
-    expect(results).toBeDefined();
+  it("retrieves material for aws-tutor", async () => {
+    const results = await retrieveContext("DynamoDB and IAM policies", "aws-tutor");
     expect(results.length).toBeGreaterThan(0);
   });
 
-  it("should retrieve context correctly for job-technical-interviewer", () => {
-    const results = retrieveContext("JavaScript closure and hooks", "job-technical-interviewer");
-    expect(results).toBeDefined();
+  it("retrieves material for the interview area", async () => {
+    const results = await retrieveContext("JavaScript closure and hooks", "job-techinical-interview");
     expect(results.length).toBeGreaterThan(0);
   });
 
-  it("should detect area correctly and route to specialist", async () => {
-    const initialState: AgentWorkspaceState = {
-      messages: [new HumanMessage("Explain Conway's Game of Life")],
-      nextAgent: "the-brain",
-    };
-
-    const stateOutput = await theBrainNode(initialState);
-    expect(stateOutput.nextAgent).toBe("cellular-automata");
-    expect(stateOutput.brainIntroduction).toContain("The same thing we do every night");
+  it("ranks chunks matching more query terms first", async () => {
+    __setVectorStore([
+      { area: "test", content: "nothing relevant here" },
+      { area: "test", content: "alpha only" },
+      { area: "test", content: "alpha beta gamma together" },
+    ]);
+    const results = await retrieveContext("alpha beta gamma", "test");
+    expect(results[0].content).toBe("alpha beta gamma together");
+    expect(results.map((r) => r.content)).not.toContain("nothing relevant here");
   });
 
-  it("should explain that no specialist is available when query does not match", async () => {
-    const initialState: AgentWorkspaceState = {
-      messages: [new HumanMessage("How do I bake bread?")],
-      nextAgent: "the-brain",
-    };
-
-    const stateOutput = await theBrainNode(initialState);
-    expect(stateOutput.messages).toBeDefined();
-    const lastMsg = stateOutput.messages![stateOutput.messages!.length - 1];
-    expect(typeof lastMsg.content).toBe("string");
-    expect(lastMsg.content as string).toContain("no specialist agent is available");
-    expect(lastMsg.content as string).toContain("aws-tutor");
-    expect(lastMsg.content as string).toContain("cellular-automata");
-    expect(stateOutput.nextAgent).toBe("end");
+  it("returns nothing for an unknown area", async () => {
+    __setVectorStore([{ area: "test", content: "alpha" }]);
+    expect(await retrieveContext("alpha", "no-such-area")).toEqual([]);
   });
 
-  it("should run specialist node and combine introduction and answer", async () => {
-    const state: AgentWorkspaceState = {
-      messages: [new HumanMessage("Explain Conway's Game of Life")],
-      nextAgent: "cellular-automata",
-      brainIntroduction: "The same thing we do every night, Pinky—try to take over the world! Let us consult the cellular-automata archives."
-    };
+  it("carries provenance back so a claim can be attributed", async () => {
+    __setVectorStore([
+      { area: "test", content: "Lenia uses a continuous growth mapping.", source: "ca/lenia.md", heading: "Growth" },
+    ]);
+    const [hit] = await retrieveContext("continuous growth mapping", "test");
+    expect(hit.source).toBe("ca/lenia.md");
+    expect(hit.heading).toBe("Growth");
+    expect(formatPassages([hit])).toContain("passage 1 — ca/lenia.md § Growth");
+  });
 
-    const stateOutput = await cellularAutomataNode(state);
-    expect(stateOutput.messages).toBeDefined();
-    const lastMsg = stateOutput.messages![stateOutput.messages!.length - 1];
-    const text = lastMsg.content as string;
+  it("gives every chunk a stable id even when the store predates them", async () => {
+    __setVectorStore([{ area: "test", content: "alpha beta" }]);
+    const [hit] = await retrieveContext("alpha", "test");
+    expect(hit.id).toBe(chunkId("alpha beta"));
+  });
+});
 
-    const lines = text.split("\n");
-    expect(lines.length).toBeGreaterThan(1);
-    
-    // First line is from theBrainIntroduction
-    expect(lines[0]).toMatch(/(world|Pinky|domination)/i);
-    // Third line (or after double line breaks) is the specialist professional answer
-    expect(lines[2]).toMatch(/(lesson|overview|cellular)/i);
-    expect(stateOutput.nextAgent).toBe("end");
+describe("extractSubtopics", () => {
+  afterEach(() => {
+    __resetVectorStore();
+  });
+
+  it("uses roles for the interview roadmaps", () => {
+    __setVectorStore([
+      { area: "job", content: "Role: React Developer - Topic: Hooks" },
+      { area: "job", content: "Role: React Developer - Topic: State" },
+      { area: "job", content: "Role: Node.js Developer - Topic: Streams" },
+    ]);
+    expect(extractSubtopics("job")).toEqual(["React Developer", "Node.js Developer"]);
+  });
+
+  it("uses top-level headings when an area has enough of them", () => {
+    const chunks = Array.from({ length: 6 }, (_, i) => ({
+      area: "md",
+      content: `# Heading ${i}`,
+    }));
+    chunks.push({ area: "md", content: "## Nested heading" });
+    __setVectorStore(chunks);
+    const subtopics = extractSubtopics("md");
+    expect(subtopics).toHaveLength(6);
+    expect(subtopics).not.toContain("Nested heading");
+  });
+
+  it("falls back to including H2s for shallow areas", () => {
+    __setVectorStore([
+      { area: "md", content: "# Only Heading" },
+      { area: "md", content: "## IELTS" },
+      { area: "md", content: "## TOEFL" },
+    ]);
+    expect(extractSubtopics("md")).toEqual(["Only Heading", "IELTS", "TOEFL"]);
+  });
+
+  it("finds real subtopics for each configured topic", () => {
+    loadVectorStore();
+    for (const topic of TOPICS) {
+      expect(extractSubtopics(topic.area).length, `no subtopics for ${topic.id}`).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("resolveArticlePath", () => {
+  it("appends .md and slugifies", () => {
+    expect(path.basename(resolveArticlePath("Game of Life"))).toBe("Game-of-Life.md");
+  });
+
+  it("keeps an existing .md extension", () => {
+    expect(path.basename(resolveArticlePath("conway.md"))).toBe("conway.md");
+  });
+
+  it("confines path traversal to the articles directory", () => {
+    const resolved = resolveArticlePath("../../etc/passwd");
+    expect(path.dirname(resolved)).toBe(path.resolve(process.cwd(), "articles"));
+    expect(path.basename(resolved)).toBe("passwd.md");
+  });
+});
+
+describe("Article tools", () => {
+  let tmpDir: string;
+  let cwdSpy: any;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "brain-articles-"));
+    cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(tmpDir);
+  });
+
+  afterEach(() => {
+    cwdSpy.mockRestore();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("saves an article and reports its path", async () => {
+    const { brainTools } = await import("../../agents/tools.js");
+    const saveArticle = brainTools.find((t: any) => t.name === "save_article")!;
+
+    const result: any = await saveArticle.invoke({
+      filename: "test-article.md",
+      content: "# Test\n\nBody.",
+    });
+
+    // ARTICLES_DIR is resolved at module load, so assert on the reported path.
+    const reportedPath = String(result).replace("Article saved to ", "");
+    expect(fs.existsSync(reportedPath)).toBe(true);
+    expect(fs.readFileSync(reportedPath, "utf-8")).toContain("# Test");
+    fs.rmSync(reportedPath, { force: true });
+  });
+
+  it("refuses to update an article that does not exist", async () => {
+    const { brainTools } = await import("../../agents/tools.js");
+    const updateArticle = brainTools.find((t: any) => t.name === "update_article")!;
+
+    const result: any = await updateArticle.invoke({
+      filename: "does-not-exist-at-all.md",
+      content: "nope",
+    });
+    expect(String(result)).toContain("No article exists");
+  });
+});
+
+describe("System prompt", () => {
+  it("establishes the persona and the user as Pinky", () => {
+    expect(BRAIN_SYSTEM_PROMPT).toContain("The Brain");
+    expect(BRAIN_SYSTEM_PROMPT).toContain("The user IS Pinky");
+  });
+
+  it("encodes the journey steps and the teaching loop", () => {
+    expect(BRAIN_SYSTEM_PROMPT).toContain("list_topics");
+    expect(BRAIN_SYSTEM_PROMPT).toContain("list_subtopics");
+    expect(BRAIN_SYSTEM_PROMPT).toContain("save_article");
+    expect(BRAIN_SYSTEM_PROMPT).toContain("update_article");
+    expect(BRAIN_SYSTEM_PROMPT).toMatch(/Decompose/i);
+    expect(BRAIN_SYSTEM_PROMPT).toMatch(/Never fake progress/i);
   });
 });

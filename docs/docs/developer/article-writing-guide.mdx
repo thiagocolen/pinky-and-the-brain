@@ -1,0 +1,306 @@
+---
+sidebar_position: 5
+title: Article Writing Guide
+description: The standard The Brain writes articles to, distilled from five sources on article craft.
+---
+
+# The article writing guide
+
+The standard The Brain writes to. This is the source of the rules compiled into
+`ARTICLE_CRAFT_PROMPT` (`src/agents/prompts.ts`) — edit this document when the
+standard changes, and mirror the change there.
+
+It is distilled from five sources on writing articles:
+
+- Cambridge International, *Writing an article* (2023)
+- Gotham Writers Workshop, *15 Tips for Writing Articles*
+- Saahil Nair, *How to Write an Article: A Six-Step Guide* (LinkedIn)
+- Derek Hughes, *An Absolute Beginner's Guide to Writing Your First Article* (Medium)
+- BBC Bitesize / Revision World, *Writing an article* (GCSE English)
+
+---
+
+## 1. Before writing: decide four things
+
+Every source begins here, and none of them begins with prose.
+
+**Topic — narrow it until it is one thing.** Gotham's first rule is to keep the
+scope small: don't write about climate change, write about the one boat that
+picks up plastic. Hughes puts the same test in terms of size — the scope of a
+first article should resemble *a single section*, not a chapter and certainly
+not a book. Nair suggests fixing it with a working title or logline before you
+start, which stops the piece rambling into tangents.
+
+**Audience — who is reading, and what do they already know?** Cambridge notes
+that an article writer does not know their readers personally, so you must
+reason about their likely interests and experience. Nair asks specifically about
+background, profession, education level and existing knowledge, because those
+determine structure, tone and vocabulary.
+
+**Purpose — inform, persuade, entertain, or reflect?** Cambridge frames the
+central choice: are you persuading readers to agree with you, or inviting them
+to weigh viewpoints and decide for themselves? The answer changes whether you
+need to sound reliable and well-informed or to choose words that carry emotion.
+
+**Why the reader should care.** Gotham makes this the question that governs the
+whole presentation. The answer needn't be elaborate — usually it is actionable
+instruction, or an appeal to a universal theme (relationships, children,
+careers, meaning).
+
+> Gotham's contrarian note on finding topics: consider what you *don't* know
+> rather than what you do. The best article ideas hide in the gaps.
+
+## 2. Structure: three parts, planned in advance
+
+Cambridge, Nair and BBC Bitesize all specify the same shape, and all three say
+to outline it before drafting.
+
+1. **Introduction** — engage the reader's interest and introduce the argument or
+   the main points to be discussed. Bitesize suggests opening with an intriguing
+   statement, a question, or an interesting fact.
+2. **Middle** — develop relevant, interesting points that inform the reader or
+   convince them to consider a perspective. Expand what the introduction
+   promised; support it with facts, statistics, examples or expert opinion.
+3. **End** — draw the points together and leave the reader with a clear
+   impression: either the argument you want them to believe, or the viewpoints
+   you want them to weigh. A circular ending that returns to the opening image
+   works well.
+
+Nair's outline can be as light as a list of subheadings: *"An outline helps you
+focus while you're writing, and makes the final outcome clearer to your
+readers."*
+
+**Gotham's warning about where the craft actually lives:** true art is in the
+structure — the logical, smooth unrolling of the narrative from paragraph to
+paragraph — not in ornate language. Elegant sentences do not rescue a piece that
+is assembled in the wrong order.
+
+## 3. Paragraphs, headings and connections
+
+- **Organise ideas into paragraphs deliberately.** One idea per paragraph,
+  developed and supported, is what builds an argument rather than listing
+  assertions.
+- **Show at a glance what the article is about.** Cambridge: articles need a
+  headline that attracts attention, and subheadings — "a bit like mini
+  headlines" — to break the text up and move the reader on. *Do not overdo
+  them.* Well-chosen subheadings both catch attention and summarise the points
+  being made.
+- **Make the connections explicit.** Where a point follows from what came
+  before, signal it: *in addition*, *likewise*, *similarly*. Where it contrasts,
+  say so: *however*, *true, it could be argued that…*
+- **Headlines can use technique.** Bitesize notes alliteration as a way to make
+  a title catchy and memorable.
+
+## 4. Voice and language
+
+**Register: semi-formal by default.** Cambridge's test is to imagine the article
+read aloud and ask how it would sound to the reader. A film review may be
+humorous or even sarcastic; that same voice fails on a serious topic or with
+serious readers.
+
+**Modern articles are conversational.** Gotham: today's writers speak with the
+voice of today — raw, short, punchy — telling the story as if to a friend over
+coffee.
+
+**Vary the sentences.** Cambridge is blunt about the failure mode: the same
+sentence shapes and simple repetitive vocabulary all the way through are boring
+to read. Range in grammatical structure and relevant vocabulary is what keeps a
+reader going.
+
+**Match language to purpose.** Objective language informs; persuasive language
+argues; descriptive language evokes. The persuasive toolkit is rhetorical
+questions, the rule of three, and hyperbole; the literary one is metaphor,
+simile and personification. Colloquial language suits a conversational piece or
+a younger audience, and undermines a formal one.
+
+**Write short.** Gotham: new writers must learn to write short — few editors
+will hand over 1,000 words before they have seen what you do with 100.
+
+## 5. Evidence and credibility
+
+Support claims with facts, statistics, examples or expert opinion. Cambridge's
+worked example quotes a lifestyle expert to carry a point the writer could not
+assert alone, and identifies contrasting viewpoints explicitly so the reader can
+see where support lies on each side. For a balanced article this is the core
+move: present the perspectives, mark them as perspectives, then leave the reader
+equipped to judge.
+
+The evidence has to come from somewhere, and here it comes from
+[retrieval](./retrieval). Every passage `retrieve_content` returns is labelled
+with the document and section it came from:
+
+```text
+--- passage 1 — cellular-automata/references/lenia.md § Growth mappings ---
+```
+
+So a claim can name its source rather than float free. That labelling is recent:
+until chunks carried provenance, the material arrived anonymously and the most a
+writer could do was assert. Retrieval quality matters here for the same reason —
+an article is only as well-supported as the passages it was given, and four in
+twenty questions used to come back with ten passages containing nothing useful.
+
+## 6. Layout — how the article sits on the page
+
+Unlike the rest of this guide, this section is not distilled from the five
+sources. It is a house convention: the shape the blog at
+[thiagocolen.github.io](https://thiagocolen.github.io) can render, and therefore
+the shape The Brain writes to.
+
+The rule behind it is that **an article is laid out in the file it is written
+in**, not decorated afterwards at publication. Pinky reviews the article before
+it is published, and what they review should be the real shape of the post — not
+prose plus a promise about how it will look.
+
+Three marks do the work. All three are ordinary markdown to read, and are
+translated into the blog's MDX by `src/agents/layout.ts`.
+
+````markdown
+# Lenia
+
+### Or: how I learned to love the blob
+
+Cellular automata have a well-worn origin story...
+
+:::tip Why this matters
+Emergence is easier to watch than it is to define.
+:::
+
+![A Lenia orbium glider drifting across the grid](image: concentric rings dissolving into soft blobs)
+````
+
+**The deck** — an `###` line immediately under the title, and nowhere else. It
+becomes the post's `headline`, rendered under the `<h1>`. Because the title is
+capped at about six words (it becomes the URL), the deck is where a longer or
+wittier phrase goes. One line. It is not a summary and not the opening sentence
+rewritten; it earns the reader's next thirty seconds.
+
+Note the distinction the blog draws, and that an authoring agent will otherwise
+conflate: the **deck** appears on the post page, while the **description** is the
+blurb on the article card in the listing and appears nowhere on the page itself.
+
+**Callouts** — `:::note`, `:::tip` or `:::warn`, closed with `:::`, with an
+optional title after the type. They become `<Callout>` on the blog, which
+degrades an unrecognised type to `note` rather than failing. A callout carries
+something worth saying that would derail the paragraph beside it — a caveat, an
+aside, a warning — and must never restate what the prose already says. One or two
+per article; five means the structure is wrong.
+
+**Figures** — `![alt text](image: what the picture should show)`. The alt text
+becomes the visible caption, so it is written for a reader. The part after
+`image:` is never displayed: it is an instruction to an illustrator, and at
+publication it is what the image model is asked for. Two to four per article,
+spaced through it, only where a picture does work that words would do clumsily.
+
+Figure images are generated at publication, not at writing time, and their URLs
+depend on the slug the blog derives from the title — so the body is drafted with
+inert HTML-comment markers and patched once the images exist. A figure whose
+image cannot be generated has its marker dropped: the article is worth more than
+the picture, and generation failures are soft everywhere in this pipeline.
+
+Because the illustrations are abstract patterns, a figure prompt should ask for a
+*concept* — shapes, structure, motion — and never for a labelled diagram or
+anything containing text. Image models render lettering eagerly and get it subtly
+wrong, and a misspelled word in a picture is worse than no picture.
+
+A figure prompt says *what* to show and never *how it should look*. The style is
+not the author's to choose: one is fixed per article at publication and shared by
+the cover and every figure, so the pictures read as one set. Asking for a colour,
+a medium or a technique in a figure prompt only fights that choice. Which style
+an article gets, and where to change the catalogue, is in
+[Agent Flow](./agent-flow#adding-instructions-about-the-illustrations).
+
+## 7. The signature
+
+Every article closes with the same four lines, written into the file as the
+article is written:
+
+````markdown
+
+---
+
+*Written by **The Brain**, of [Pinky and the Brain Agents](https://github.com/thiagocolen/pinky-and-the-brain).*
+````
+
+This is a house convention rather than anything the five sources argue for, and
+it answers a question a reader of the blog can otherwise only guess at: who wrote
+this, and what wrote it. The link is the honest answer — the agent, its prompts
+and this guide are all in that repository, so a reader who wants to know how the
+piece was produced can go and read the machinery.
+
+Three properties are deliberate.
+
+**It is fixed wording, not a closing line.** The standard gives the exact text and
+asks for it verbatim. A credit reworded per article is a flourish; a credit that
+reads the same everywhere is a signature, and only the second one is recognisable
+as such after a dozen posts.
+
+**It lives in the article file, not in the publisher.** It would be easy — and
+more reliable — to have `publish_article` append it the way it attaches a cover
+image. It is in the file instead, for the reason the layout is: what Pinky reviews
+before publishing should be the finished article, and a finished article is a
+signed one. The cost of that choice is that nothing enforces it; the standard, the
+checklist and the `BRAIN_SYSTEM_PROMPT` regression tests are what hold it in place.
+
+**The blank line before the `---` is load-bearing.** Three hyphens directly beneath
+a paragraph are setext underlining in markdown, not a thematic break, so a
+signature pressed against the last paragraph silently promotes that paragraph to an
+`<h2>` and the article ends on a heading. With the blank line it renders as `<hr>`
+followed by the credit. Both behaviours are pinned by tests in
+`src/tests/unit/publishing.test.ts`, which render the wording taken from
+`ARTICLE_CRAFT_PROMPT` itself rather than a copy of it — so the instruction and the
+renderer cannot drift apart.
+
+On revision, the signature is already in the file and stays where it is. Adding it
+a second time is the failure mode to watch for.
+
+## 8. Revise — as a separate act
+
+Nair and Hughes both separate drafting from editing rather than interleaving
+them.
+
+Hughes recommends spreading an article across **three sessions** — idea and
+outline, then drafting, then editing — precisely so no single sitting has to
+carry the whole weight. Nair's editing pass checks four things: grammar,
+structural flow, relevance to the defined audience, and whether the piece stayed
+on topic. Both suggest a second reader.
+
+Hughes' note on why first articles don't get written is worth keeping: the
+obstacle is rarely "how do I start" — it is self-doubt, fear of ridicule and
+impostor syndrome. His answer is that the only way past them is to start, and
+that a process to follow is what keeps you from getting lost.
+
+## 9. The checklist
+
+Before an article is finished:
+
+- [ ] The topic is one thing, not a subject area.
+- [ ] The audience is identified, and the tone and vocabulary suit them.
+- [ ] The purpose — inform, persuade, entertain, reflect — is decided and consistent.
+- [ ] A reader can tell within a paragraph why they should care.
+- [ ] There is an introduction that engages, a developed middle, and an end that resolves.
+- [ ] The title is short enough to be a URL, and the deck carries the longer phrasing.
+- [ ] The deck says what the piece is about and earns attention.
+- [ ] Subheadings break up the text — enough to navigate by, not so many they fragment it.
+- [ ] Every callout carries an aside the prose could not, rather than repeating it.
+- [ ] Every figure does work words would do clumsily; the decorative ones are cut.
+- [ ] Each paragraph carries one idea, and links to its neighbours are explicit.
+- [ ] Sentence structure and vocabulary vary.
+- [ ] Claims are supported by fact, example, statistic or quotation.
+- [ ] Nothing is longer than it needs to be.
+- [ ] The signature closes the file — once, word for word, with its blank line intact.
+- [ ] It has been edited in a pass of its own, for grammar, flow, relevance and focus.
+
+## Sources
+
+- [Cambridge International — *Writing an article* (PDF)](https://learning.cambridgeinternational.org/classroom/pluginfile.php/218996/mod_label/intro/Writing_an_article.pdf)
+- [Gotham Writers Workshop — *15 Tips for Writing Articles*](https://www.writingclasses.com/toolbox/articles/15-tips-for-writing-articles)
+- [Saahil Nair — *How to Write an Article: A Six-Step Guide*](https://www.linkedin.com/pulse/how-write-article-six-step-guide-saahil-nair)
+- [Derek Hughes — *An Absolute Beginner's Guide to Writing Your First Article*](https://medium.com/new-writers-welcome/an-absolute-beginners-guide-to-writing-your-first-article-422b9d552584)
+- [BBC Bitesize — *Writing an article*](https://www.bbc.co.uk/bitesize/guides/zwt3rdm/revision/4) · [Revision World equivalent](https://revisionworld.com/gcse-revision/english-language-gcse/writing/writing-non-fiction/writing-article)
+
+> **Retrieval note.** The Cambridge PDF, the LinkedIn guide and the Medium guide
+> were read in full. The Gotham article returns HTTP 403 to automated fetches —
+> roughly half its fifteen tips were recovered via search excerpts, and only
+> those are quoted here. BBC Bitesize blocks fetching entirely; the Revision
+> World page covering the same GCSE specification was used in its place. Anyone
+> extending this guide should open those two by hand.

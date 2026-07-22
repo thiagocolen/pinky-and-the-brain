@@ -10,11 +10,15 @@ node_modules/
 .env
 .env.*
 
+# Articles written by the agent
+articles/
+
 # Database / cache
 *.db
 *.db-shm
 *.db-wal
-src/storage/vector-store.json
+src/storage/knowledge-store.json
+src/storage/embeddings.bin
 
 #
 
@@ -47,3 +51,6 @@ Thumbs.db
 # Local developer overrides
 terraform.tfvars
 *.auto.tfvars
+
+# Temporary files
+_temp*

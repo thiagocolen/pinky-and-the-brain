@@ -17,11 +17,12 @@ organized into an End-User section and a Developer & Technical section.
   MCP, Terraform infrastructure).
 - `src/index.ts`, `src/cli.ts`, `src/server.ts`, `src/mcp.ts`: the four entrypoints.
 - `src/config.ts`: environment variables, Zod schema, `.env` loading order.
-- `src/agents/graph.ts`, `the-brain.ts`, `specialists.ts`, `types.ts`: the LangGraph
-  supervisor/specialist orchestration, routing, and shared state shape.
+- `src/agents/agent.ts`, `graph.ts`, `persona.ts`, `prompts.ts`, `tools.ts`, `types.ts`:
+  the Deep Agent assembly, the persona and journey prompts, the tools, and the
+  `runGraphWorkflow` compatibility layer.
 - `src/protocol/acp-server.ts`, `messages.ts`: the ACP JSON-RPC methods and schemas.
 - `src/storage/sqlite.ts`, `s3.ts`: local checkpointing and cloud state persistence.
-- `src/utils/model.ts`: LLM provider selection (Gemini vs OpenAI).
+- `src/utils/model.ts`: the Anthropic Claude model factory.
 - `terraform/*.tf`: AWS infrastructure (ECR, ECS, CloudFront, IAM, SSM parameters).
 
 All facts used in the docs come directly from these files - no invented behavior.
@@ -50,7 +51,8 @@ docs/docs/
     troubleshooting.mdx                  (common setup/runtime errors, expanded)
   developer/                              ("Developer & Technical Documentation", position 3)
     project-structure.mdx                (repo layout table, derived from readme.md)
-    architecture.mdx                     (agent graph, routing, persistence, data-flow diagrams)
+    architecture.mdx                     (the deep agent, state, persistence, data-flow diagrams)
+    agent-flow.mdx                       (persona, user journey flowchart, tools, design notes)
     source-code-reference.mdx            (per-module reference: agents/protocol/storage/utils)
     acp-protocol.mdx                     (JSON-RPC methods & error codes implemented)
     infrastructure.mdx                   (Terraform/AWS/Docker deployment topology)

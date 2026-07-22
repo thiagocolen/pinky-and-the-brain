@@ -1,5 +1,5 @@
 ---
-sidebar_position: 3
+sidebar_position: 6
 ---
 
 # Source Code Reference
@@ -41,33 +41,54 @@ export) by other Node.js projects that want to embed the graph engine directly.
 
 ## Agents (`src/agents/`)
 
+See [Agent Flow](/docs/developer/agent-flow) for how these fit together.
+
 ### `types.ts`
 
-Defines `AgentWorkspaceState`, the shared LangGraph state shape (see
-[Architecture](/docs/developer/architecture#shared-state-agentworkspacestate)).
+Defines `AgentWorkspaceState` (the run's state shape, see
+[Architecture](/docs/developer/architecture#state)), `AgentProgress`, and `BrainAgent` -
+a deliberately narrow interface over the compiled agent, because `createDeepAgent`'s
+inferred type references zod types nested inside `deepagents/node_modules` that
+TypeScript cannot name from this project (TS2742).
+
+### `agent.ts`
+
+Exports `createBrainAgent()`, which assembles the Deep Agent from `createChatModel()`,
+the tools, the system prompt (with the built-in Deep Agents base prompt removed via
+`base: null`), and the `SQLiteCheckpointer`. Also exports the `checkpointer` singleton.
 
 ### `graph.ts`
 
-Declares the `StateAnnotation` (LangGraph's typed state/reducers), compiles the
-`StateGraph` with all five nodes and their conditional edges, exports the compiled
-`graph` and `checkpointer` singletons, and exposes `runGraphWorkflow()` - the single
-function called by every entrypoint to execute the graph for a given `agentName`,
-`prompt`, and `threadId`, streaming `progressCallback` updates as the graph executes.
+The compatibility layer. Exports `runGraphWorkflow(agentName, prompt, threadId,
+progressCallback)` - the single function called by every entrypoint - plus the
+`checkpointer` and a lazily-constructed `graph` (a proxy over `getGraph()`, so importing
+this module never requires an API key). It returns the run's final state with
+`instructorState.explanation` set to the latest assistant reply.
 
-### `the-brain.ts`
+### `persona.ts`
 
-Exports `detectArea(text)` (pure keyword-based domain detection) and `theBrainNode()`
-(the supervisor graph node). Loads persona reference documents (`XXX-GEMINI.md`,
-`PATBATPP-Dialogues-Source.md`) from a `docs/` directory via `getResource()`, which
-searches several candidate paths relative to the compiled file location so it works
-both in `src/` (ts-node/dev) and `dist/` (compiled) layouts.
+Exports `BRAIN_PERSONA_PROMPT`: The Brain's voice, catchphrases, and the rule that
+technical accuracy always outranks theatrics.
 
-### `specialists.ts`
+### `prompts.ts`
 
-Exports `retrieveContext(query, area)` (keyword-overlap scoring against the vector
-store), the shared `runSpecialistNode(state, area)` implementation, and the four
-graph node wrappers (`awsTutorNode`, `cellularAutomataNode`,
-`englishCertificationInstructorNode`, `jobTechnicalInterviewerNode`).
+Exports `JOURNEY_PROMPT` (the conversation state machine and the teaching loop) and
+`BRAIN_SYSTEM_PROMPT` (persona + journey).
+
+### `tools.ts`
+
+Exports `brainTools` - `list_topics`, `list_subtopics`, `retrieve_content`,
+`save_article`, `update_article`, `read_article`, `publish_article`, `export_article` -
+along with the `TOPICS` registry and the functions behind the tools:
+`retrieveContext(query, area, limit, { mode })` (BM25 fused with vector similarity;
+see [Retrieval](./retrieval)), `formatPassages()` (which labels each passage with the
+document and section it came from), `loadKnowledgeStore()`, `loadEmbeddingStore()`,
+`extractSubtopics(area)`, `resolveTopic()`, and `resolveArticlePath()` (which confines
+model-chosen filenames to `./articles/`).
+
+`retrieveContext` is async, because the vector half embeds the query. Its `mode`
+argument exists only so the evaluation harness can score both retrievers in one
+process; the agent leaves it alone and takes the configured default.
 
 ## Protocol (`src/protocol/`)
 
@@ -97,17 +118,76 @@ Zod schemas for JSON-RPC requests and every ACP method's params
 
 ## Utils (`src/utils/`)
 
+### `retrieval.ts`
+
+The lexical retriever, and pure: no I/O, no config, no knowledge of where chunks come
+from. `chunkId()` (content-addressed identity), `tokenize()`, `stem()`, `STOPWORDS`,
+`buildIndex()`, `search()` (BM25) and `fuseRankings()` (reciprocal rank fusion).
+Every rule in it fixes a measured defect of the substring-counting scorer it replaced —
+see [Retrieval](./retrieval).
+
+### `embeddings.ts`
+
+The vector half, and soft-failing throughout: `embed()` (Gemini, with backoff on a
+429), `embedQuery()` (memoised, since a teaching loop retrieves the same subtopic
+repeatedly), `normalise()`, `quantise()`, `cosine()`, and `encodeStore()` /
+`decodeStore()` for the binary `embeddings.bin` format. A missing key, a refusal or a
+network error returns null and retrieval continues on BM25 alone.
+
 ### `model.ts`
 
-`createChatModel(temperature)` - returns a `ChatGoogleGenerativeAI` if
-`GOOGLE_API_KEY` is set, otherwise a `ChatOpenAI` (`gpt-4-turbo`) if `OPENAI_API_KEY` is
-set, otherwise throws.
+`createChatModel()` - returns a `ChatAnthropic` using `ANTHROPIC_API_KEY` and
+`config.anthropicModel` (default `claude-sonnet-5`), or throws if the key is missing.
+Anthropic is the only supported provider. No `temperature` is sent, because Claude
+Sonnet 5 rejects the parameter.
 
 ### `messages.ts`
 
 `isAIMessage`, `isHumanMessage`, `getMessageContent` - defensive type guards/content
 extractors that work for both live LangChain message class instances and
 deserialized plain objects (e.g. after a checkpoint round-trip).
+
+### `blog-mcp.ts`
+
+The blog's own publishing tools, reached over MCP. `withBlogSession()` spawns the
+`articles` server that ships inside the thiagocolen.github.io checkout named by
+`BLOG_REPO_PATH`, runs a callback against it, and always closes the child process —
+one session per publish, since the server holds a git worktree open.
+
+`resolveBlogRepoPath()` fails with an actionable message when the checkout is missing
+or is on a branch without `mcp-server/`. Tool results are unwrapped by a helper that
+turns the MCP `isError` flag into a thrown `BlogToolError`, because the SDK resolves
+rather than rejects on it — without that, failure text would be parsed as success.
+
+`__setBlogSession` / `__resetBlogSession` are the test seam: they replace the whole
+session, so tests never spawn a process.
+
+### `image-gen.ts`
+
+Cover and figure generation, the one place Google appears in an otherwise
+Anthropic-only agent — Claude does not generate images, and nothing in the reasoning or
+writing path goes through here. `generateCoverImage()` and `generateBodyImage()` build a
+prompt (subject first, then the article's style, then the no-text and full-bleed clauses)
+and request it at a fixed aspect ratio — covers `1:1`, figures `16:9` — and the single
+pixel tier in `GEMINI_IMAGE_SIZE`. A cover ends up larger than a figure because a square
+frame holds more pixels than a wide one, not because it asks for more: which tiers exist
+is a property of the model, and the default one refuses both `512` and `2K`.
+
+Every failure is soft — a missing key, a refusal, a network error and an empty response
+all return `null`, and the article publishes without the picture. Because that hides a
+refused `imageSize` just as thoroughly as a network blip, a failed request is retried
+once at `1K` before it gives up.
+
+`__setImageGenerator` / `__resetImageGenerator` are the test seam, replacing the model
+call so tests never reach the network.
+
+### `illustration-styles.ts`
+
+The ten styles an article can be drawn in, and `styleFor()`, which hashes a title
+(FNV-1a) to exactly one of them. One style per article, shared by its cover and all its
+figures. Deterministic on purpose: republishing an article already under review must not
+redraw it in a different style. Keyed on the title rather than the slug, because the blog
+does not report a slug until the draft exists — by which point the images are generated.
 
 ### `logger.ts`
 
@@ -119,6 +199,10 @@ in the project root, gated by the `LOG_LEVEL` environment variable
 
 ### `src/scripts/ingest.ts`
 
-Walks a source documents directory tree, splits files into paragraph-level chunks, and
-writes them (tagged with an `area`) into `src/storage/vector-store.json`. Supports a
-`--remote` flag (`npm run ingest:remote`) for ingesting from a remote source.
+Walks the curated corpus (`CURATED_CONTENT_PATH`), splits files into paragraph-level
+chunks, and writes them into `src/storage/knowledge-store.json` tagged with an `area`,
+a content-addressed `id`, the `source` file and the nearest `heading`. Duplicate
+paragraphs collapse by id. When a Gemini key is present it also embeds every chunk
+that does not already have a vector and writes `src/storage/embeddings.bin` —
+resumable, because reuse is keyed on that id. See
+[Retrieval](/docs/developer/retrieval).

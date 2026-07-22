@@ -15,17 +15,18 @@ files loaded in the following order (later values override earlier ones):
 
 | Variable | Description |
 | --- | --- |
-| `OPENAI_API_KEY` or `GOOGLE_API_KEY` | At least one LLM provider key is required. `src/utils/model.ts` prefers Google Gemini when `GOOGLE_API_KEY` is set, otherwise falls back to OpenAI. |
+| `ANTHROPIC_API_KEY` | Required. Anthropic is the only supported LLM provider (`src/utils/model.ts`); there is no fallback to another provider. |
 | `PATBA_API_KEY` (or `API_KEY` / `AWS_APP_API_KEY`) | Shared secret used to authenticate REST API requests (see the `X-API-Key` header in [Server Usage](/docs/end-user/server-usage)). |
 
-`validateConfig()` throws at startup if neither LLM key nor `PATBA_API_KEY` is
+`validateConfig()` throws at startup if no LLM key or no `PATBA_API_KEY` is
 configured, for every entrypoint (`index.ts`, `cli.ts`, `server.ts`, `mcp.ts`).
 
 ## Optional variables
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model name used when `GOOGLE_API_KEY` is set. |
+| `ANTHROPIC_MODEL` | `claude-sonnet-5` | Claude model name used by the agent. |
+| `ANTHROPIC_MAX_TOKENS` | `16000` | Output tokens per reply. Must be stated: the client derives its own default from a table of model-name prefixes that `claude-sonnet-5` is not in, and falls through to 4096. Raising it far past the default does not work either — the Anthropic SDK refuses a non-streaming request estimated to run over ten minutes, which caps this around 21333. |
 | `NODE_ENV` | `development` | Runtime environment name. |
 | `SQLITE_DB_PATH` | `state.db` | Path to the local SQLite checkpoint database (relative paths are resolved against the project root). |
 | `PORT` | `8080` | Port used by the Express REST/SSE server. |
@@ -35,6 +36,49 @@ configured, for every entrypoint (`index.ts`, `cli.ts`, `server.ts`, `mcp.ts`).
 | `LANGCHAIN_TRACING_V2` / `LANGSMITH_TRACING` | `false` | Enables LangSmith tracing. |
 | `LANGCHAIN_API_KEY` / `LANGSMITH_API_KEY` | unset | Required for LangSmith tracing to actually send traces. |
 | `LANGCHAIN_PROJECT` / `LANGSMITH_PROJECT` | `pinky-and-the-brain-agents` | LangSmith project name. |
+| `BLOG_REPO_PATH` | `../thiagocolen.github.io` | Checkout of the blog whose `articles` MCP server publishes finished articles. |
+| `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) | unset | Enables cover-image generation, and the vector half of [retrieval](/docs/developer/retrieval). Without it articles still publish (without an image) and retrieval still works (BM25 alone). |
+| `RETRIEVAL_MODE` | `hybrid` | `lexical` uses BM25 alone. Hybrid already falls back on its own when there is no key, no embeddings file or a failed call, so set this only to drop the per-turn embedding call deliberately. |
+| `GEMINI_EMBEDDING_MODEL` | `gemini-embedding-001` | Embeds chunks during `npm run ingest`, and queries at run time. |
+| `GEMINI_EMBEDDING_DIM` | `256` | Dimensions kept from the model's native 3072. Changing it invalidates every stored vector — the agent notices the mismatch and ignores them rather than comparing different lengths, so re-run `npm run ingest`. |
+| `CURATED_CONTENT_PATH` | sibling `patb-rag-curated-content` | Folder `npm run ingest` reads source documents from, one directory per area. |
+| `GEMINI_IMAGE_MODEL` | `gemini-3.1-flash-lite-image` | Model used for cover images and article figures. |
+| `GEMINI_IMAGE_SIZE` | `1K` | Pixel tier requested for every generated image. Which tiers a model serves varies — the default one accepts `1K` and refuses both `512` and `2K` — and a refused size is retried once at `1K`, so a wrong value costs latency rather than pictures. |
+
+## Publishing articles to the blog
+
+The blog is a **separate repository**, and it owns its own publishing tools. When Pinky asks
+The Brain to publish a finished article, the agent does not write posts itself — it drives
+the `articles` MCP server that ships inside the blog at `mcp-server/index.js`, calling
+`create_draft` → `add_asset` → `update_post` → `stage_changes`.
+
+This matters because it removes a whole class of drift. The blog's frontmatter shape, its
+slug rules, where images live and which branch is safe to push are now defined in exactly
+one place — `develop-tools/posts.js`, the same module the site's own npm scripts use — and
+this agent is a client of it rather than a second opinion about it.
+
+### Prerequisites
+
+`BLOG_REPO_PATH` must point at a checkout that:
+
+- is on a branch containing `mcp-server/` (it arrives with `feature/mcp-publisher-tool`), and
+- has had `npm install` run inside `mcp-server/` once.
+
+If either is missing, publishing fails with a message naming the exact path it looked for.
+
+### What publishing does and does not do
+
+- **The server writes to its own git worktree**, `.mcp-worktree/`, checked out to
+  `new-articles`. You can be mid-edit on any branch of the blog without colliding with it.
+- **Pushing uses that checkout's own git credentials.** No token belongs in `.env`.
+- **Nothing is ever published live.** Two independent gates stand between an article and the
+  public site, and the agent passes neither on its own: the post's `status` flag (the agent
+  never calls `publish_post`, so drafts stay `unpublished`) and the pull request itself. No
+  workflow builds `new-articles`, so pushing there cannot reach the web.
+
+Cover images are generated with `gemini-3.1-flash-lite-image` and added through `add_asset`,
+which returns the `/images/…` URL that goes into the post's `cover_image`. This is the only
+place a non-Anthropic model is used; all text generation remains Anthropic-only.
 
 ## AWS credentials and the S3 fallback
 
