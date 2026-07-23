@@ -21,6 +21,7 @@ variable "langchain_tracing_v2" {
 variable "langchain_api_key" {
   type      = string
   sensitive = true
+  default   = ""
 }
 
 variable "langchain_project" {
