@@ -51,10 +51,101 @@ environment-specific values before running Terraform.
 3. `npm run deploy` (`scripts/deploy.js`) builds the Docker image, pushes it to ECR,
    and runs Terraform to apply/update the AWS infrastructure.
 4. `npm run report-infra` (`scripts/report-infra.ps1`) audits the live AWS
-   infrastructure status.
+   infrastructure status and writes a timestamped Markdown report to
+   `infra-reports/`. It is read-only - it never creates or changes resources.
+
+   It inventories networking, compute and containers, storage and databases,
+   application/integration services, developer tooling, global services (S3,
+   CloudFront, Route 53, IAM) and secrets/config - roughly 52 API calls per region
+   plus a set of account-wide calls. Each region sweep ends with a Resource Groups
+   Tagging API call that returns every taggable resource regardless of type, so a
+   resource can only escape the report by being both untagged and of a type the
+   script does not describe explicitly. Anything that shows up in that catch-all
+   without a matching section above it is the signal to add a new query.
+
+   The script prompts for the regions to scan, listing every supported region so
+   any number of them can be picked by index (`1,3,5`), range (`1-4`), or name
+   (`sa-east-1,us-east-1`). Pressing ENTER with no selection scans **all** regions,
+   which is roughly 290 AWS API calls and takes a while - the prompt warns about
+   this before you commit to it.
+
+   To skip the prompt, pass `-Region sa-east-1,us-east-1` or `-AllRegions`. The
+   script also falls back to scanning all regions when stdin is not interactive,
+   so CI runs never hang on the prompt.
+
+   Failed AWS calls are printed to the console and collected into a *Failed AWS
+   Calls* section at the end of the report, so an empty section can be told apart
+   from a missing IAM permission.
 5. `npm run tail-logs` streams logs from the running cloud container.
+
+## Provisioning from scratch
+
+`npm run create-infra` (`scripts/create-infra.ps1`) takes an empty account to a running
+service. It exists because `npm run deploy` assumes the infrastructure is already
+there: `deploy` is the code-change path, `create-infra` is the from-nothing path.
+
+The order is forced by the dependencies:
+
+1. **Preflight** - `aws`, `terraform`, `npm` (and `docker`, unless `-SkipImage`) on
+   PATH, credentials that resolve, a Docker daemon that answers.
+2. **SSM parameters** - `main.tf` reads the three secrets as `data` sources, so
+   Terraform errors out rather than creating them. Missing ones are seeded from `.env`
+   (`GITHUB_ACCESS_TOKEN`, `ANTHROPIC_API_KEY`, `AWS_APP_API_KEY`, with the same
+   fallbacks `src/config.ts` uses) or prompted for with hidden input. Existing
+   parameters are never overwritten, and values never reach the console or the report.
+3. **`terraform init`**, then a **targeted apply of the ECR repository alone** - the
+   ECS service points at `<ecr-url>:latest`, so the repository has to exist before the
+   image and the image before the service.
+4. **`npm run build`, `docker build`, ECR login, push.**
+5. **Full `terraform apply`** - IAM roles, ECS cluster, Express Gateway service,
+   CloudFront distribution.
+
+Re-running is safe; every step is idempotent, so it doubles as the recovery path for a
+half-finished run. `-PlanOnly` runs `terraform plan` and stops. `-SkipImage` reuses
+whatever tag is already in ECR. Each run writes
+`infra-reports/<timestamp>-create-<mode>-report.md` with the per-step outcome and
+timing - including runs that failed, which are the interesting ones.
+
+## Account cleanup and teardown
+
+`scripts/cleanup-infra.ps1` runs in two scopes. See
+[Infrastructure cleanup](./infrastructure-cleanup.mdx) for the classification rules,
+safety model and deletion order.
+
+| Command | Scope |
+| --- | --- |
+| `npm run cleanup-infra` | Deletes AWS resources that are **not** part of this project, so the account holds nothing but `pinky-and-the-brain-agents`. |
+| `npm run teardown-infra` | `-IncludeProject`: deletes the project too, for a full account wipe. Rebuild with `npm run create-infra`. |
+
+Both are dry runs unless `-Apply` is passed. The dry run deletes nothing, makes only
+List/Describe calls, and writes its plan to
+`infra-reports/<timestamp>-<cleanup|teardown>-dry-run-report.md`.
 
 ## Required IAM permissions
 
-`terraform/aws-required-permissions.json` documents the minimum IAM permission set an
-operator's AWS credentials need in order to run `terraform apply` for this stack.
+`terraform/aws-permissions.json` is a single policy covering all three scripts - the
+read-only inventory, the provisioning, and the deletions. Attach it to the deploying
+user or role.
+
+It is one file rather than three because an AWS customer-managed policy is capped at
+6,144 characters, and the earlier per-script policies came to 8,468 characters
+combined. Collapsing the `Resource: "*"` blocks and using action wildcards
+(`ec2:Describe*`, `ecs:List*`) brings it to roughly 3,700, well inside the limit.
+
+Two `Deny` statements are the ones worth reading:
+
+- **`ProtectCallerCredentials`** - the caller's own IAM user and the policy granting
+  these permissions cannot be modified or deleted. Without it, a teardown run can
+  revoke its own access halfway through and strand the account.
+- **`ProtectServiceLinkedRoles`** - AWS-owned roles under `/aws-service-role/` are off
+  limits. They are free and AWS recreates them on demand.
+
+There is deliberately **no** `Deny` protecting the project's own resources: the
+teardown mode needs to delete them, so the guard rails live in the script
+(dry run by default, and a typed `DELETE EVERYTHING` confirmation) rather than in IAM.
+
+The `penny-processor` user does not currently hold this policy, so the scripts report
+`AccessDenied` for most resource types. Those failures are listed explicitly in each
+report's *Failed AWS Calls* section - a denied call is never read as "this resource
+type is empty", and the cleanup script never plans a deletion for a type it could not
+enumerate.
