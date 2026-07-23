@@ -1,0 +1,190 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadEverything",
+      "Effect": "Allow",
+      "Action": [
+        "acm:Describe*",
+        "acm:List*",
+        "apigateway:GET",
+        "application-autoscaling:Describe*",
+        "autoscaling:Describe*",
+        "cloud9:Describe*",
+        "cloud9:List*",
+        "cloudformation:Describe*",
+        "cloudformation:List*",
+        "cloudwatch:Describe*",
+        "codebuild:List*",
+        "codedeploy:List*",
+        "codepipeline:List*",
+        "cognito-idp:List*",
+        "dynamodb:Describe*",
+        "dynamodb:List*",
+        "ec2:Describe*",
+        "ecr:Describe*",
+        "ecr:List*",
+        "ecs:Describe*",
+        "ecs:List*",
+        "eks:List*",
+        "elasticache:Describe*",
+        "elasticfilesystem:Describe*",
+        "elasticloadbalancing:Describe*",
+        "es:List*",
+        "events:List*",
+        "iam:Get*",
+        "iam:List*",
+        "kinesis:List*",
+        "lambda:List*",
+        "logs:Describe*",
+        "logs:FilterLogEvents",
+        "logs:Get*",
+        "rds:Describe*",
+        "redshift:Describe*",
+        "route53:List*",
+        "s3:GetBucketLocation",
+        "s3:List*",
+        "secretsmanager:List*",
+        "sns:List*",
+        "sqs:List*",
+        "ssm:Describe*",
+        "states:List*",
+        "sts:GetCallerIdentity",
+        "tag:GetResources"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CreateProjectStack",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:*",
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
+        "ecr:CompleteLayerUpload",
+        "ecr:CreateRepository",
+        "ecr:GetAuthorizationToken",
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:InitiateLayerUpload",
+        "ecr:PutImage",
+        "ecr:PutImageScanningConfiguration",
+        "ecr:TagResource",
+        "ecr:UntagResource",
+        "ecr:UploadLayerPart",
+        "ecs:CreateCluster",
+        "ecs:CreateExpressGatewayService",
+        "ecs:CreateService",
+        "ecs:RegisterTaskDefinition",
+        "ecs:TagResource",
+        "ecs:UntagResource",
+        "ecs:UpdateExpressGatewayService",
+        "ecs:UpdateService"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ManageProjectIamRoles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:AttachRolePolicy",
+        "iam:CreatePolicy",
+        "iam:CreatePolicyVersion",
+        "iam:CreateRole",
+        "iam:PassRole",
+        "iam:TagPolicy",
+        "iam:TagRole",
+        "iam:UpdateAssumeRolePolicy"
+      ],
+      "Resource": [
+        "arn:aws:iam::*:policy/pinky-and-the-brain-agents-*",
+        "arn:aws:iam::*:role/pinky-and-the-brain-agents-*"
+      ]
+    },
+    {
+      "Sid": "ManageProjectSecrets",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:DeleteParameter",
+        "ssm:GetParameter",
+        "ssm:GetParameters",
+        "ssm:PutParameter"
+      ],
+      "Resource": "arn:aws:ssm:*:*:parameter/pinky-and-the-brain-agents/*"
+    },
+    {
+      "Sid": "DeleteInfrastructure",
+      "Effect": "Allow",
+      "Action": [
+        "acm:DeleteCertificate",
+        "autoscaling:DeleteAutoScalingGroup",
+        "cloud9:DeleteEnvironment",
+        "cloudformation:DeleteStack",
+        "cloudwatch:DeleteAlarms",
+        "codebuild:DeleteProject",
+        "codedeploy:DeleteApplication",
+        "codepipeline:DeletePipeline",
+        "ec2:DeleteInternetGateway",
+        "ec2:DeleteKeyPair",
+        "ec2:DeleteNatGateway",
+        "ec2:DeleteRouteTable",
+        "ec2:DeleteSecurityGroup",
+        "ec2:DeleteSnapshot",
+        "ec2:DeleteSubnet",
+        "ec2:DeleteVolume",
+        "ec2:DeleteVpc",
+        "ec2:DeregisterImage",
+        "ec2:DetachInternetGateway",
+        "ec2:DisassociateAddress",
+        "ec2:ReleaseAddress",
+        "ec2:TerminateInstances",
+        "ecr:DeleteRepository",
+        "ecs:DeleteCluster",
+        "ecs:DeleteExpressGatewayService",
+        "ecs:DeleteService",
+        "ecs:DeleteTaskDefinitions",
+        "ecs:DeregisterTaskDefinition",
+        "elasticloadbalancing:DeleteLoadBalancer",
+        "elasticloadbalancing:DeleteTargetGroup",
+        "iam:DeleteInstanceProfile",
+        "iam:DeletePolicy",
+        "iam:DeletePolicyVersion",
+        "iam:DeleteRole",
+        "iam:DeleteRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:RemoveRoleFromInstanceProfile",
+        "lambda:DeleteFunction",
+        "logs:DeleteLogGroup",
+        "ssm:DeleteParameter"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ProtectCallerCredentials",
+      "Effect": "Deny",
+      "Action": [
+        "iam:AttachUserPolicy",
+        "iam:CreatePolicyVersion",
+        "iam:DeletePolicy",
+        "iam:DeletePolicyVersion",
+        "iam:DeleteUser",
+        "iam:DeleteUserPolicy",
+        "iam:DetachUserPolicy",
+        "iam:PutUserPolicy",
+        "iam:SetDefaultPolicyVersion"
+      ],
+      "Resource": [
+        "arn:aws:iam::*:policy/pinky-and-the-brain-infra",
+        "arn:aws:iam::*:user/${aws:username}"
+      ]
+    },
+    {
+      "Sid": "ProtectServiceLinkedRoles",
+      "Effect": "Deny",
+      "Action": [
+        "iam:DeleteRole",
+        "iam:DetachRolePolicy"
+      ],
+      "Resource": "arn:aws:iam::*:role/aws-service-role/*"
+    }
+  ]
+}

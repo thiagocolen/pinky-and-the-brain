@@ -1,5 +1,5 @@
 ---
-sidebar_position: 4
+sidebar_position: 5
 title: Retrieval (RAG)
 description: How The Brain finds the source material it teaches and writes from — BM25, embeddings, and how the two are fused.
 ---
@@ -206,7 +206,9 @@ npm run build && npm run ingest
 
 Ingest walks the curated corpus, splits documents into paragraphs, records each
 chunk's source and heading, collapses duplicates by id, and embeds anything that
-does not already have a vector.
+does not already have a vector. See [Data Ingestion](./data-ingestion) for the full
+pipeline — the corpus layout, both chunking paths, and where the artifacts are
+written.
 
 :::tip Embedding is resumable
 The quota counts each *text*, not each request, so a batch of 100 spends 100 of

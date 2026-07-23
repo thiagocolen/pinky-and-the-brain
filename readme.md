@@ -56,7 +56,8 @@ pinky-and-the-brain/
 ├── terraform/                          # AWS Cloud IaC Configurations
 │   ├── main.tf                         # ECR, ECS Cluster, ECS Express Gateway Service, DynamoDB, S3, IAM
 │   ├── variables.tf                    # Deployment settings & regional variables
-│   └── outputs.tf                      # AWS CloudRunner service endpoints
+│   ├── outputs.tf                      # AWS CloudRunner service endpoints
+│   └── aws-permissions.json            # Single IAM policy covering the create, report and cleanup/teardown scripts
 ├── src/
 │   ├── index.ts                        # Main readline CLI (ACP Stdin/Stdout Entrypoint)
 │   ├── cli.ts                          # Standalone interactive REPL CLI for local testing
@@ -93,6 +94,8 @@ pinky-and-the-brain/
 │   ├── deploy.js                       # Deploy orchestration script (Docker build, ECR push, Terraform run)
 │   ├── eval-retrieval.js               # Scores the retrievers against a labelled query set
 │   ├── report-infra.ps1                # PowerShell script for AWS infrastructure status audits
+│   ├── create-infra.ps1                # PowerShell script provisioning the full AWS stack from nothing
+│   ├── cleanup-infra.ps1               # PowerShell script deleting AWS resources - non-project, or all with -IncludeProject (dry run by default)
 │   ├── tail-logs.js                    # Script to stream cloud container logs
 │   └── test-tracing.js                 # Script to verify LangSmith tracing connection
 ├── package.json                        # Scripts & dependencies

@@ -1,0 +1,213 @@
+---
+sidebar_position: 4
+title: Data Ingestion
+description: How the curated corpus becomes the knowledge store and embeddings The Brain retrieves from — chunking, provenance, embedding, and where the artifacts go.
+---
+
+# Data Ingestion
+
+Everything [Retrieval](./retrieval) can return, ingestion had to put there first.
+It is the **offline compile step** that walks the curated corpus and produces the
+two artifacts the agent reads at run time:
+
+| Artifact | What it is |
+| --- | --- |
+| `src/storage/knowledge-store.json` | The chunk database — 5,166 paragraph-level chunks (~2.4 MB), each tagged with an `area`, a content-addressed `id`, its `source` file and nearest `heading`. |
+| `src/storage/embeddings.bin` | One quantised 256-dimension vector per chunk (~1.3 MB). Optional: built only when a Gemini key is present. |
+
+It runs from a single entry point, `src/scripts/ingest.ts` (the `main` function),
+and never runs at request time. Nothing in the serving path rebuilds these files;
+the agent only ever reads them. That separation is the point — ingestion is where
+the slow, rate-limited, occasionally-failing work happens, so retrieval can be a
+pure in-memory scan.
+
+## Running it
+
+```bash
+npm run build && npm run ingest
+```
+
+`build` first, because ingest imports compiled helpers and mirrors its output into
+`dist/` for a running build to pick up (see [Outputs](#outputs-and-where-they-go)).
+
+## Input: the curated corpus
+
+### Where it is found
+
+`resolveCuratedContentPath()` tries a list of candidates in order and takes the
+first that exists on disk:
+
+1. `CURATED_CONTENT_PATH` (the configured path — this should win in any real setup)
+2. a sibling `../patb-rag-curated-content`
+3. `../agent-project/patb-rag-curated-content`
+4. a hard-coded absolute Windows path from the project's earliest days
+
+The last three are historical fallbacks, kept so an existing checkout still ingests
+without configuration. That final absolute path was once the *only* way the script
+found anything — which meant re-ingestion worked on exactly one machine. Setting
+`CURATED_CONTENT_PATH` is what makes it portable.
+
+### How it is laid out
+
+Each **top-level subdirectory of the corpus is an `area`** — the metadata filter
+the model later selects when it retrieves:
+
+```text
+patb-rag-curated-content/
+├── aws-tutor/
+├── cellular-automata/
+├── english-certification-instructor/
+└── job-techinical-interview/
+```
+
+Everything below an area directory is walked recursively, with one exception: any
+directory named `raw/` is skipped. The raw roadmap folders are far too large, and
+the formatted versions beside them carry the same material in a smaller form.
+
+## Chunking — two paths
+
+`parseAndCollectFiles()` handles two kinds of source file differently.
+
+### Markdown and text (`.md`, `.txt`)
+
+The file is split into paragraphs on blank lines (`/\n\s*\n/`), keeping semantic
+blocks together. For each paragraph:
+
+- The **nearest preceding markdown heading is tracked forward**. A paragraph that
+  opens with a heading both *is* a chunk and *sets* the `heading` recorded on every
+  chunk after it, until the next heading replaces it. This is what lets a retrieved
+  passage say where it came from, which the
+  [Article Writing Guide](./article-writing-guide) leans on when it asks for claims
+  to be attributed.
+- Paragraphs of **20 characters or fewer are dropped**. A lone `---`, a stray
+  heading with no body, or a two-word line is noise in a retriever — it matches
+  loosely and teaches nothing.
+
+Each surviving paragraph becomes a chunk carrying its `id`, `content`, `area`,
+`source`, and `heading`.
+
+### Roadmap JSON (`formatted-*.json`, or any `.json` under a `roadmaps/` path)
+
+Some source material is structured rather than prose. A roadmap JSON with a `title`
+and a `topics` array is flattened into synthetic one-line chunks:
+
+```text
+Role: Cloud Architect - Description: …
+Role: Cloud Architect - Topic: Networking fundamentals (beginner)
+Role: Cloud Architect - Topic: VPC design (intermediate)
+```
+
+The role line is emitted once; then one line per `topic`/`subtopic`/`title` entry.
+This turns a nested outline into flat, individually-retrievable statements without
+asking the retriever to understand JSON. A malformed file is logged and skipped
+rather than aborting the run.
+
+## Chunk identity and provenance
+
+Every chunk's `id` is derived from its own content, not its position:
+
+```ts
+sha256(content).slice(0, 12)   // chunkId(), src/utils/retrieval.ts
+```
+
+This is **content addressing**, and it is what makes re-ingestion cheap and safe:
+
+- An array index would change the moment a paragraph is added anywhere earlier in
+  the corpus — silently invalidating every stored embedding and the evaluation
+  fixture. A content-addressed id only changes when the *text* changes.
+- Identical paragraphs appearing in more than one file **collapse to a single
+  chunk**, because they hash to the same id. Returning the same passage twice would
+  only spend the model's attention twice.
+
+After the walk, chunks are de-duplicated by id and the count of collapsed
+duplicates is logged.
+
+## Embedding
+
+Embedding is handled by `buildEmbeddings()` and is entirely optional.
+
+:::note Ingestion never requires a key
+Without `GEMINI_API_KEY` (or `GOOGLE_API_KEY`), ingest logs a warning and writes the
+knowledge store alone. Retrieval then runs on BM25, which is a complete retriever on
+its own — the vectors improve answers rather than gate them. This is the same
+posture retrieval takes at run time.
+:::
+
+When a key is present:
+
+- **Only chunks without a current vector are embedded.** Reuse is keyed on the
+  content-addressed id, so re-ingesting after editing one file pays to embed that
+  file's paragraphs and nothing else.
+- **A dimension or model mismatch forces a full rebuild.** Vectors from a previous
+  run are reused only if their stored `dim` and `model` match the current config;
+  mixing vectors of different lengths or from different models would make cosine
+  similarity meaningless.
+- **Requests are batched and paced** — 100 texts per request, one batch every two
+  seconds. The Gemini quota counts each *text*, not each request, so a batch of 100
+  spends 100 of the 3,000-per-minute allowance; sending batches back to back would
+  burn the whole minute in twenty seconds and then stall.
+- **The run is resumable.** If a batch fails, ingest keeps every vector already
+  built and stops. Re-running resumes exactly where it left off, because reuse is
+  keyed on the id. This is not hypothetical — the first full run stopped at 3,000 of
+  5,166 chunks, and the second finished the remaining 2,166.
+- **Vectors are L2-normalised then quantised to one byte per dimension**
+  (`normalise` → `quantise`, `src/utils/embeddings.ts`) and embedded with the
+  `RETRIEVAL_DOCUMENT` task type. The [Retrieval](./retrieval#semantic-embeddings)
+  page explains why each of those matters.
+- **Orphaned vectors are pruned.** Before writing, ingest rebuilds the vector map
+  from the live chunk list, so deleting source material *shrinks* `embeddings.bin`
+  instead of leaving dead vectors in it forever.
+
+## Outputs and where they go
+
+A single ingest run writes to as many as three places:
+
+| Destination | What | When |
+| --- | --- | --- |
+| `src/storage/` | `knowledge-store.json` + `embeddings.bin` | Always |
+| `dist/storage/` | Same two files | Only if a `dist/` build exists — so a running compiled build sees the new store |
+| S3 (`uploadState`) | `knowledge-store.json` **only** | Best-effort; a failure (offline / no credentials) is logged and ignored |
+
+Note that **embeddings are never uploaded to S3** — only the knowledge store is.
+Both files are gitignored and reach the container image through `COPY src/` at build
+time, which is how the vectors travel into production. See
+[Infrastructure](./infrastructure) for the image and
+[Architecture](./architecture) for how the running agent loads them.
+
+## Configuration
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `CURATED_CONTENT_PATH` | *(empty — falls back)* | The folder holding the per-area source directories. Set this; the fallbacks exist only for legacy checkouts. |
+| `GEMINI_API_KEY` / `GOOGLE_API_KEY` | *(empty)* | Enables the embedding stage. Absent ⇒ knowledge store only, lexical retrieval. |
+| `GEMINI_EMBEDDING_MODEL` | `gemini-embedding-001` | The model used to embed chunks (and queries at run time). |
+| `GEMINI_EMBEDDING_DIM` | `256` | Vector dimension. Changing it invalidates every stored vector, so re-run ingest — mismatched vectors are rebuilt, not compared. |
+
+## Re-ingesting after an edit
+
+Because identity is content-addressed, re-ingestion is close to free for everything
+you did not touch:
+
+```bash
+npm run build && npm run ingest
+```
+
+Edit one source file and re-run: the chunks whose text is unchanged keep their ids,
+so their vectors are reused; only the edited paragraphs are re-embedded; and any
+chunk you deleted has its vector pruned from the file. There is no separate "clean"
+step and no way to end up with stale vectors for text that no longer exists.
+
+## Where to change things
+
+| Change | Where |
+| --- | --- |
+| What counts as a chunk, the 20-char floor, heading tracking | `parseAndCollectFiles` in `src/scripts/ingest.ts` |
+| Roadmap-JSON flattening | `parseAndCollectFiles` (the `.json` branch) |
+| Corpus location and fallbacks | `resolveCuratedContentPath` in `src/scripts/ingest.ts` |
+| Batch size, pacing, resume/reuse logic | `buildEmbeddings` in `src/scripts/ingest.ts` |
+| Chunk id derivation | `chunkId` in `src/utils/retrieval.ts` |
+| Normalisation, quantisation, file format | `src/utils/embeddings.ts` |
+
+Anything that changes what gets ingested or how it is chunked changes what
+retrieval can find, so follow it with `npm run eval:retrieval` — see
+[Retrieval › Measuring it](./retrieval#measuring-it).

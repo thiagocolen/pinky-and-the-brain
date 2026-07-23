@@ -11,6 +11,7 @@ pinky-and-the-brain/
     main.tf                           # ECR, ECS cluster, ECS Express Gateway service, CloudFront, IAM
     variables.tf                      # Deployment settings & regional variables
     outputs.tf                        # AWS service endpoints (App Runner/CloudFront/ECR)
+    aws-permissions.json              # Single IAM policy covering the create, report and cleanup/teardown scripts
   src/
     index.ts                          # Raw ACP stdin/stdout entrypoint
     cli.ts                            # Standalone interactive REPL CLI
@@ -52,6 +53,8 @@ pinky-and-the-brain/
   scripts/                            # Deploy & operations scripts
     deploy.js                         # Deploy orchestration script (Docker build, ECR push, Terraform run)
     report-infra.ps1                  # PowerShell script for AWS infrastructure status audits
+    create-infra.ps1                  # PowerShell script provisioning the full AWS stack from nothing
+    cleanup-infra.ps1                 # PowerShell script deleting AWS resources - non-project, or all with -IncludeProject (dry run by default)
     tail-logs.js                      # Script to stream cloud container logs
     test-tracing.js                   # Script to verify LangSmith tracing connection
   Dockerfile                          # Multi-stage container build

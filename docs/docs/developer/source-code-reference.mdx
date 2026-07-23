@@ -1,5 +1,5 @@
 ---
-sidebar_position: 6
+sidebar_position: 7
 ---
 
 # Source Code Reference
@@ -205,4 +205,5 @@ a content-addressed `id`, the `source` file and the nearest `heading`. Duplicate
 paragraphs collapse by id. When a Gemini key is present it also embeds every chunk
 that does not already have a vector and writes `src/storage/embeddings.bin` —
 resumable, because reuse is keyed on that id. See
-[Retrieval](/docs/developer/retrieval).
+[Data Ingestion](/docs/developer/data-ingestion) for the full pipeline, and
+[Retrieval](/docs/developer/retrieval) for how the artifacts are read back.

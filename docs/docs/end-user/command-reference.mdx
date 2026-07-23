@@ -20,7 +20,13 @@ sidebar_position: 7
 | `npm run ingest` | `node dist/scripts/ingest.js` | Rebuild the local vector store. |
 | `npm run ingest:remote` | `node dist/scripts/ingest.js --remote` | Rebuild the vector store from a remote source. |
 | `npm run deploy` | `node scripts/deploy.js` | Docker build, ECR push, and Terraform deploy. |
-| `npm run report-infra` | `scripts/report-infra.ps1` | PowerShell AWS infrastructure status audit. |
+| `npm run report-infra` | `scripts/report-infra.ps1` | PowerShell AWS infrastructure status audit. Prompts for which regions to scan. Read-only. |
+| `npm run create-infra` | `scripts/create-infra.ps1` | Provisions the whole stack from nothing: SSM secrets, ECR, image build and push, ECS service, CloudFront. |
+| `npm run create-infra:plan` | `scripts/create-infra.ps1 -PlanOnly` | Shows what `create-infra` would provision. Creates nothing. |
+| `npm run cleanup-infra` | `scripts/cleanup-infra.ps1` | Plans the deletion of every AWS resource that is not part of this project. Dry run - deletes nothing. |
+| `npm run cleanup-infra:apply` | `scripts/cleanup-infra.ps1 -Apply` | Same, but actually deletes, after you type `DELETE` to confirm. |
+| `npm run teardown-infra` | `scripts/cleanup-infra.ps1 -IncludeProject` | Plans a full account teardown, this project included. Dry run - deletes nothing. |
+| `npm run teardown-infra:apply` | `scripts/cleanup-infra.ps1 -IncludeProject -Apply` | Destroys the running service, after you type `DELETE EVERYTHING` to confirm. |
 | `npm run tail-logs` | `node scripts/tail-logs.js` | Stream cloud container logs. |
 | `npm run test-tracing` | `node scripts/test-tracing.js` | Verify LangSmith tracing connectivity. |
 | `npm run ls-studio` | `npx @langchain/langgraph-cli dev` | Run LangGraph Studio locally against `langgraph.json`. |
