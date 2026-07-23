@@ -2,9 +2,15 @@
 .SYNOPSIS
     Lists and describes all AWS resources provisioned in the account.
 .DESCRIPTION
-    Queries AWS via the AWS CLI and generates a detailed report of the infrastructure,
-    including network, database, container registry, compute, security, and secrets.
+    Queries AWS via the AWS CLI and generates a full inventory of the account: networking,
+    compute, containers, storage, databases, application/integration services, developer
+    tooling, global services (S3, CloudFront, Route 53, IAM) and secrets/config.
     Does not restrict queries by tags.
+
+    Every region sweep also ends with a Resource Groups Tagging API call, which returns
+    every taggable resource in the region regardless of type. That is the safety net for
+    resource types this script does not describe explicitly, so a resource can only hide
+    from the report if it is both untagged and of an unlisted type.
 
     When no region is supplied the script prompts for an interactive region selection.
     Choosing nothing scans every supported region, which issues a large number of AWS
@@ -29,6 +35,11 @@ $ErrorActionPreference = "SilentlyContinue"
 
 # Collects every AWS CLI failure so they can be printed and appended to the report
 $apiErrors = @()
+
+# Regions that simply do not offer a service. Tracked apart from $apiErrors: these are
+# not gaps in the report, so counting them as failures would make a complete sweep look
+# incomplete and bury the failures that do matter.
+$unavailableEndpoints = @()
 
 # Resolve script directory and paths
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -56,10 +67,10 @@ $availableRegions = @(
     "ap-northeast-3", "ap-southeast-1", "ap-southeast-2", "ap-south-1"
 )
 
-# Roughly how many AWS CLI calls each region costs (17 fixed describes, plus one
+# Roughly how many AWS CLI calls each region costs (51 fixed describes, plus one
 # extra per ECS cluster). Used to size the "this will take a while" alert - keep
 # in sync with the query loop below.
-$callsPerRegion = 17
+$callsPerRegion = 52
 
 # Turns a raw answer ("1,3", "1-4", "sa-east-1", "all") into a region list.
 # Returns an empty array when nothing valid was recognised.
@@ -245,22 +256,98 @@ $allSecrets = @()
 $allSsmParams = @()
 $allLogGroups = @()
 
+# Networking (added)
+$allVpcEndpoints = @()
+$allPeerings = @()
+$allClassicElbs = @()
+$allCertificates = @()
+
+# Monitoring (added)
+$allAlarms = @()
+$allScalableTargets = @()
+
+# Compute & containers (added)
+$allVolumes = @()
+$allSnapshots = @()
+$allImages = @()
+$allKeyPairs = @()
+$allAsgs = @()
+$allEcsServices = @()
+$allTaskDefs = @()
+$allLambdas = @()
+$allAppRunner = @()
+$allEksClusters = @()
+
+# Storage & databases (added)
+$allRdsClusters = @()
+$allRdsSnapshots = @()
+$allDynamoTables = @()
+$allElastiCache = @()
+$allRedshift = @()
+$allEfs = @()
+$allOpenSearch = @()
+
+# Application & integration (added)
+$allRestApis = @()
+$allHttpApis = @()
+$allSnsTopics = @()
+$allSqsQueues = @()
+$allEventRules = @()
+$allStateMachines = @()
+$allKinesisStreams = @()
+$allUserPools = @()
+
+# Developer & deployment tooling (added)
+$allStacks = @()
+$allCodeBuild = @()
+$allCodeDeploy = @()
+$allPipelines = @()
+$allCloud9 = @()
+
+# Catch-all sweep via the Resource Groups Tagging API
+$allTaggedResources = @()
+
 # Helper to run AWS CLI command and parse JSON.
 # Failures are never swallowed: the AWS CLI stderr is printed and recorded in
 # $apiErrors so a sparse report can be told apart from a missing permission.
 function Get-AwsResource {
     param(
         [string]$Command,
-        [string]$QueryName
+        [string]$QueryName,
+        # Some list APIs print nothing at all when the account has no such resource
+        # (sqs list-queues is the usual offender). For those, a clean exit with empty
+        # output means "none", not a failure, and must not pollute the error section.
+        [switch]$AllowEmpty
     )
     Write-Host "Fetching $QueryName..." -ForegroundColor Gray
 
     # The 2>&1 must live inside the expression string: applying it to Invoke-Expression
     # itself does not capture the stderr of the native command it runs.
-    $output = Invoke-Expression "$Command 2>&1"
-    $exitCode = $LASTEXITCODE
+    #
+    # $ErrorActionPreference must also be Continue for the duration of the call. Under
+    # the script-wide SilentlyContinue, Windows PowerShell 5.1 discards the merged
+    # stderr records entirely, which would reduce every AccessDenied to a bare exit
+    # code and make a missing IAM permission indistinguishable from any other failure.
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = Invoke-Expression "$Command 2>&1"
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
+
     $json = ($output | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) -join "`n"
-    $stdErr = ($output | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { $_.ToString() }) -join "`n"
+    # Exception.Message holds the raw stderr line; ToString() prefixes it with the
+    # RemoteException type name for native commands.
+    $stdErr = ($output |
+        Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } |
+        ForEach-Object { $_.Exception.Message } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join " "
+
+    if ($AllowEmpty -and $exitCode -eq 0 -and [string]::IsNullOrWhiteSpace($json)) {
+        return $null
+    }
 
     if ($exitCode -ne 0 -or [string]::IsNullOrWhiteSpace($json)) {
         $detail = if (-not [string]::IsNullOrWhiteSpace($stdErr)) {
@@ -269,6 +356,17 @@ function Get-AwsResource {
             "AWS CLI exited with code $exitCode and produced no output."
         } else {
             "AWS CLI returned an empty response."
+        }
+
+        # A region that does not host a service fails to resolve its endpoint entirely.
+        # That means "this service does not exist here", not "this call was refused".
+        if ($detail -match 'Could not connect to the endpoint URL') {
+            Write-Host "  SKIPPED: $QueryName (service not available in this region)" -ForegroundColor DarkGray
+            $script:unavailableEndpoints += [PSCustomObject]@{
+                Query   = $QueryName
+                Command = $Command
+            }
+            return $null
         }
 
         Write-Host "  FAILED: $QueryName" -ForegroundColor Red
@@ -295,6 +393,105 @@ function Get-AwsResource {
         }
         return $json
     }
+}
+
+# Runs one describe/list call and returns its items with the region stamped on each.
+# Collapses the fetch -> null-check -> tag loop that every resource type needs.
+# $Property is the JSON key holding the collection; APIs that return bare strings
+# (list-task-definitions, list-queues, ...) are wrapped so they still carry a Region.
+function Get-RegionalItems {
+    param(
+        [string]$Command,
+        [string]$QueryName,
+        [string]$Property,
+        [string]$Region
+    )
+
+    $result = Get-AwsResource -Command $Command -QueryName $QueryName -AllowEmpty
+    if ($null -eq $result) { return @() }
+
+    # $Property may be a dotted path (e.g. "DistributionList.Items"), so walk it.
+    $items = $result
+    if (-not [string]::IsNullOrEmpty($Property)) {
+        foreach ($segment in $Property.Split('.')) {
+            if ($null -eq $items) { break }
+            $items = $items.$segment
+        }
+    }
+    if ($null -eq $items) { return @() }
+
+    $tagged = @()
+    foreach ($item in @($items)) {
+        if ($null -eq $item) { continue }
+        if ($item -is [string]) {
+            $item = [PSCustomObject]@{ Value = $item }
+        }
+        $item | Add-Member -MemberType NoteProperty -Name "Region" -Value $Region -Force
+        $tagged += $item
+    }
+    return $tagged
+}
+
+# Flattens a value into a single markdown cell: arrays are joined, and pipes and
+# newlines are escaped so one stray value cannot break the table.
+function Format-Cell {
+    param($Value)
+
+    if ($null -eq $Value) { return "" }
+    if ($Value -is [array]) {
+        $Value = (@($Value) | Where-Object { $null -ne $_ }) -join ", "
+    }
+    return (([string]$Value) -replace '\r?\n', ' ' -replace '\|', '\|').Trim()
+}
+
+# Renders one resource collection as a markdown table, or a "nothing found" note.
+# $Columns is an ordered dictionary mapping the column header to either a property
+# name or a scriptblock evaluated against the item.
+function Format-ReportTable {
+    param(
+        [string]$Title,
+        [object[]]$Items,
+        $Columns,
+        [string]$EmptyNote = ""
+    )
+
+    $out = "### $Title`n"
+
+    if (-not $Items -or $Items.Count -eq 0) {
+        $note = if ([string]::IsNullOrEmpty($EmptyNote)) { "*No $Title found.*" } else { $EmptyNote }
+        return "$out$note`n`n"
+    }
+
+    $headers = @($Columns.Keys)
+    $out += "| " + ($headers -join " | ") + " |`n"
+    $out += "| " + (($headers | ForEach-Object { "---" }) -join " | ") + " |`n"
+
+    foreach ($item in $Items) {
+        $cells = @()
+        foreach ($h in $headers) {
+            $selector = $Columns[$h]
+            $value = if ($selector -is [scriptblock]) {
+                $item | ForEach-Object $selector
+            } else {
+                $item.$selector
+            }
+            $cells += (Format-Cell $value)
+        }
+        $out += "| " + ($cells -join " | ") + " |`n"
+    }
+
+    return "$out`n"
+}
+
+# Pulls the Name tag out of whichever tag collection the service happens to use.
+function Get-NameTag {
+    param($Item)
+
+    $tags = $Item.Tags
+    if ($null -eq $tags) { $tags = $Item.TagList }
+    if ($null -eq $tags) { return "" }
+
+    return (@($tags) | Where-Object { $_.Key -eq "Name" } | Select-Object -First 1).Value
 }
 
 # Query resources across all specified regions
@@ -453,10 +650,102 @@ foreach ($r in $regionsToCheck) {
             $allLogGroups += $lg
         }
     }
+
+    # --- Networking (extended) ---
+    $allVpcEndpoints += Get-RegionalItems "aws ec2 describe-vpc-endpoints --region $r --output json" "VPC Endpoints in $r" "VpcEndpoints" $r
+    $allPeerings     += Get-RegionalItems "aws ec2 describe-vpc-peering-connections --region $r --output json" "VPC Peering Connections in $r" "VpcPeeringConnections" $r
+    # elbv2 above only sees ALB/NLB; classic load balancers live behind a separate API.
+    $allClassicElbs  += Get-RegionalItems "aws elb describe-load-balancers --region $r --output json" "Classic Load Balancers in $r" "LoadBalancerDescriptions" $r
+    $allCertificates += Get-RegionalItems "aws acm list-certificates --region $r --output json" "ACM Certificates in $r" "CertificateSummaryList" $r
+
+    # --- Monitoring ---
+    # Alarms and scaling targets outlive the services that created them and are a
+    # common source of orphans. Both were found only via the tagging sweep before.
+    $allAlarms += Get-RegionalItems "aws cloudwatch describe-alarms --region $r --output json" "CloudWatch Alarms in $r" "MetricAlarms" $r
+    $allScalableTargets += Get-RegionalItems "aws application-autoscaling describe-scalable-targets --service-namespace ecs --region $r --output json" "Application Auto Scaling targets in $r" "ScalableTargets" $r
+
+    # --- Compute & containers (extended) ---
+    # Volumes, snapshots and AMIs survive instance termination and keep billing, so
+    # they matter far more for cleanup than the instances themselves.
+    $allVolumes   += Get-RegionalItems "aws ec2 describe-volumes --region $r --output json" "EBS Volumes in $r" "Volumes" $r
+    $allSnapshots += Get-RegionalItems "aws ec2 describe-snapshots --owner-ids self --region $r --output json" "EBS Snapshots in $r" "Snapshots" $r
+    $allImages    += Get-RegionalItems "aws ec2 describe-images --owners self --region $r --output json" "AMIs in $r" "Images" $r
+    $allKeyPairs  += Get-RegionalItems "aws ec2 describe-key-pairs --region $r --output json" "Key Pairs in $r" "KeyPairs" $r
+    $allAsgs      += Get-RegionalItems "aws autoscaling describe-auto-scaling-groups --region $r --output json" "Auto Scaling Groups in $r" "AutoScalingGroups" $r
+    $allLambdas   += Get-RegionalItems "aws lambda list-functions --region $r --output json" "Lambda Functions in $r" "Functions" $r
+    $allAppRunner += Get-RegionalItems "aws apprunner list-services --region $r --output json" "App Runner Services in $r" "ServiceSummaryList" $r
+    $allEksClusters += Get-RegionalItems "aws eks list-clusters --region $r --output json" "EKS Clusters in $r" "clusters" $r
+    $allTaskDefs  += Get-RegionalItems "aws ecs list-task-definitions --region $r --output json" "ECS Task Definitions in $r" "taskDefinitionArns" $r
+
+    # ECS services hang off the clusters collected above, so only the clusters found
+    # in this region are walked.
+    foreach ($cluster in ($allEcsClusters | Where-Object { $_.Region -eq $r })) {
+        $svcArns = Get-RegionalItems "aws ecs list-services --cluster `"$($cluster.clusterArn)`" --region $r --output json" "ECS Services in $($cluster.clusterName)" "serviceArns" $r
+        foreach ($svc in $svcArns) {
+            $svc | Add-Member -MemberType NoteProperty -Name "ClusterName" -Value $cluster.clusterName -Force
+            $allEcsServices += $svc
+        }
+    }
+
+    # --- Storage & databases (extended) ---
+    $allRdsClusters  += Get-RegionalItems "aws rds describe-db-clusters --region $r --output json" "RDS Clusters in $r" "DBClusters" $r
+    $allRdsSnapshots += Get-RegionalItems "aws rds describe-db-snapshots --snapshot-type manual --region $r --output json" "RDS Manual Snapshots in $r" "DBSnapshots" $r
+    $allDynamoTables += Get-RegionalItems "aws dynamodb list-tables --region $r --output json" "DynamoDB Tables in $r" "TableNames" $r
+    $allElastiCache  += Get-RegionalItems "aws elasticache describe-cache-clusters --region $r --output json" "ElastiCache Clusters in $r" "CacheClusters" $r
+    $allRedshift     += Get-RegionalItems "aws redshift describe-clusters --region $r --output json" "Redshift Clusters in $r" "Clusters" $r
+    $allEfs          += Get-RegionalItems "aws efs describe-file-systems --region $r --output json" "EFS File Systems in $r" "FileSystems" $r
+    $allOpenSearch   += Get-RegionalItems "aws opensearch list-domain-names --region $r --output json" "OpenSearch Domains in $r" "DomainNames" $r
+
+    # --- Application & integration (extended) ---
+    $allRestApis       += Get-RegionalItems "aws apigateway get-rest-apis --region $r --output json" "API Gateway REST APIs in $r" "items" $r
+    $allHttpApis       += Get-RegionalItems "aws apigatewayv2 get-apis --region $r --output json" "API Gateway HTTP APIs in $r" "Items" $r
+    $allSnsTopics      += Get-RegionalItems "aws sns list-topics --region $r --output json" "SNS Topics in $r" "Topics" $r
+    $allSqsQueues      += Get-RegionalItems "aws sqs list-queues --region $r --output json" "SQS Queues in $r" "QueueUrls" $r
+    $allEventRules     += Get-RegionalItems "aws events list-rules --region $r --output json" "EventBridge Rules in $r" "Rules" $r
+    $allStateMachines  += Get-RegionalItems "aws stepfunctions list-state-machines --region $r --output json" "Step Functions in $r" "stateMachines" $r
+    $allKinesisStreams += Get-RegionalItems "aws kinesis list-streams --region $r --output json" "Kinesis Streams in $r" "StreamNames" $r
+    $allUserPools      += Get-RegionalItems "aws cognito-idp list-user-pools --max-results 60 --region $r --output json" "Cognito User Pools in $r" "UserPools" $r
+
+    # --- Developer & deployment tooling (extended) ---
+    $allStacks    += Get-RegionalItems "aws cloudformation describe-stacks --region $r --output json" "CloudFormation Stacks in $r" "Stacks" $r
+    $allCodeBuild += Get-RegionalItems "aws codebuild list-projects --region $r --output json" "CodeBuild Projects in $r" "projects" $r
+    $allCodeDeploy += Get-RegionalItems "aws deploy list-applications --region $r --output json" "CodeDeploy Applications in $r" "applications" $r
+    $allPipelines += Get-RegionalItems "aws codepipeline list-pipelines --region $r --output json" "CodePipeline Pipelines in $r" "pipelines" $r
+
+    $cloud9Ids = Get-RegionalItems "aws cloud9 list-environments --region $r --output json" "Cloud9 Environments in $r" "environmentIds" $r
+    if ($cloud9Ids.Count -gt 0) {
+        $idArgs = ($cloud9Ids | ForEach-Object { $_.Value }) -join " "
+        $allCloud9 += Get-RegionalItems "aws cloud9 describe-environments --environment-ids $idArgs --region $r --output json" "Cloud9 Environment Details in $r" "environments" $r
+    }
+
+    # --- Catch-all sweep ---
+    # Returns every taggable resource in the region regardless of type, so resource
+    # types not described explicitly above still surface somewhere in the report.
+    $allTaggedResources += Get-RegionalItems "aws resourcegroupstaggingapi get-resources --region $r --output json" "Tagged Resource Sweep in $r" "ResourceTagMappingList" $r
 }
 
-# Fetch Global IAM Roles (once)
-$roles = Get-AwsResource "aws iam list-roles --output json" "IAM Roles"
+# Global services (once) - these are account-wide, not region-scoped, and were the
+# largest blind spot in earlier versions of this report.
+Write-Host "----------------------------------------------------" -ForegroundColor Gray
+Write-Host "Querying global (account-wide) resources" -ForegroundColor Cyan
+Write-Host "----------------------------------------------------" -ForegroundColor Gray
+
+$roles            = Get-AwsResource "aws iam list-roles --output json" "IAM Roles"
+$iamUsers         = Get-RegionalItems "aws iam list-users --output json" "IAM Users" "Users" "global"
+$iamGroups        = Get-RegionalItems "aws iam list-groups --output json" "IAM Groups" "Groups" "global"
+$iamPolicies      = Get-RegionalItems "aws iam list-policies --scope Local --output json" "IAM Customer-Managed Policies" "Policies" "global"
+$iamProfiles      = Get-RegionalItems "aws iam list-instance-profiles --output json" "IAM Instance Profiles" "InstanceProfiles" "global"
+$cloudfrontDists  = Get-RegionalItems "aws cloudfront list-distributions --output json" "CloudFront Distributions" "DistributionList.Items" "global"
+$route53Zones     = Get-RegionalItems "aws route53 list-hosted-zones --output json" "Route 53 Hosted Zones" "HostedZones" "global"
+$s3Buckets        = Get-RegionalItems "aws s3api list-buckets --output json" "S3 Buckets" "Buckets" "global"
+
+# S3 bucket names are global but each bucket lives in one region, which only
+# get-bucket-location reveals. Costs one extra call per bucket.
+foreach ($bucket in $s3Buckets) {
+    $loc = Get-AwsResource "aws s3api get-bucket-location --bucket `"$($bucket.Name)`" --output json" "Location of bucket $($bucket.Name)"
+    $bucketRegion = if ($loc -and $loc.LocationConstraint) { $loc.LocationConstraint } else { "us-east-1" }
+    $bucket | Add-Member -MemberType NoteProperty -Name "Region" -Value $bucketRegion -Force
+}
 
 # Build markdown report
 $report = @"
@@ -633,8 +922,42 @@ if ($allEnis.Count -gt 0) {
     $report += "`n"
 }
 
+$report += Format-ReportTable "VPC Endpoints" $allVpcEndpoints ([ordered]@{
+    "Region"       = "Region"
+    "Endpoint ID"  = "VpcEndpointId"
+    "VPC ID"       = "VpcId"
+    "Service"      = "ServiceName"
+    "Type"         = "VpcEndpointType"
+    "State"        = "State"
+})
+
+$report += Format-ReportTable "VPC Peering Connections" $allPeerings ([ordered]@{
+    "Region"        = "Region"
+    "Peering ID"    = "VpcPeeringConnectionId"
+    "Requester VPC" = { $_.RequesterVpcInfo.VpcId }
+    "Accepter VPC"  = { $_.AccepterVpcInfo.VpcId }
+    "Status"        = { $_.Status.Code }
+})
+
+$report += Format-ReportTable "Classic Load Balancers" $allClassicElbs ([ordered]@{
+    "Region"    = "Region"
+    "Name"      = "LoadBalancerName"
+    "DNS Name"  = "DNSName"
+    "VPC ID"    = "VPCId"
+    "Instances" = { @($_.Instances).Count }
+})
+
+$report += Format-ReportTable "ACM Certificates" $allCertificates ([ordered]@{
+    "Region"      = "Region"
+    "Domain"      = "DomainName"
+    "Status"      = "Status"
+    "Type"        = "Type"
+    "In Use"      = "InUse"
+    "Certificate" = "CertificateArn"
+})
+
 $report += @"
-## 2. Compute & Containers (EC2 / ECS / ECR)
+## 2. Compute & Containers (EC2 / ECS / ECR / Lambda)
 
 "@
 
@@ -678,8 +1001,83 @@ if ($allEcsClusters.Count -gt 0) {
     $report += "### ECS Clusters`n*No ECS Clusters found.*`n`n"
 }
 
+$report += Format-ReportTable "ECS Services" $allEcsServices ([ordered]@{
+    "Region"      = "Region"
+    "Cluster"     = "ClusterName"
+    "Service ARN" = "Value"
+})
+
+$report += Format-ReportTable "ECS Task Definitions" $allTaskDefs ([ordered]@{
+    "Region"              = "Region"
+    "Task Definition ARN" = "Value"
+})
+
+$report += Format-ReportTable "Lambda Functions" $allLambdas ([ordered]@{
+    "Region"        = "Region"
+    "Function Name" = "FunctionName"
+    "Runtime"       = "Runtime"
+    "Memory (MB)"   = "MemorySize"
+    "Last Modified" = "LastModified"
+})
+
+$report += Format-ReportTable "App Runner Services" $allAppRunner ([ordered]@{
+    "Region"       = "Region"
+    "Service Name" = "ServiceName"
+    "Status"       = "Status"
+    "Service URL"  = "ServiceUrl"
+})
+
+$report += Format-ReportTable "EKS Clusters" $allEksClusters ([ordered]@{
+    "Region"       = "Region"
+    "Cluster Name" = "Value"
+})
+
+$report += Format-ReportTable "Auto Scaling Groups" $allAsgs ([ordered]@{
+    "Region"    = "Region"
+    "Name"      = "AutoScalingGroupName"
+    "Desired"   = "DesiredCapacity"
+    "Min/Max"   = { "$($_.MinSize)/$($_.MaxSize)" }
+    "Instances" = { @($_.Instances).Count }
+})
+
+# EBS volumes, snapshots and AMIs outlive the instances that created them and keep
+# billing silently, so they are called out separately rather than folded into EC2.
+$report += Format-ReportTable "EBS Volumes" $allVolumes ([ordered]@{
+    "Region"      = "Region"
+    "Volume ID"   = "VolumeId"
+    "Size (GiB)"  = "Size"
+    "Type"        = "VolumeType"
+    "State"       = "State"
+    "Attached To" = { (@($_.Attachments) | ForEach-Object { $_.InstanceId }) -join ", " }
+    "Name Tag"    = { Get-NameTag $_ }
+})
+
+$report += Format-ReportTable "EBS Snapshots (owned)" $allSnapshots ([ordered]@{
+    "Region"      = "Region"
+    "Snapshot ID" = "SnapshotId"
+    "Volume ID"   = "VolumeId"
+    "Size (GiB)"  = "VolumeSize"
+    "Started"     = "StartTime"
+    "Description" = "Description"
+})
+
+$report += Format-ReportTable "AMIs (owned)" $allImages ([ordered]@{
+    "Region"   = "Region"
+    "Image ID" = "ImageId"
+    "Name"     = "Name"
+    "State"    = "State"
+    "Created"  = "CreationDate"
+})
+
+$report += Format-ReportTable "EC2 Key Pairs" $allKeyPairs ([ordered]@{
+    "Region"      = "Region"
+    "Key Name"    = "KeyName"
+    "Key Pair ID" = "KeyPairId"
+    "Type"        = "KeyType"
+})
+
 $report += @"
-## 3. Databases (RDS PostgreSQL)
+## 3. Storage & Databases
 
 "@
 
@@ -696,8 +1094,219 @@ if ($allRdsDbs.Count -gt 0) {
     $report += "### RDS Databases`n*No RDS Database Instances found.*`n`n"
 }
 
+$report += Format-ReportTable "RDS Clusters" $allRdsClusters ([ordered]@{
+    "Region"        = "Region"
+    "Cluster ID"    = "DBClusterIdentifier"
+    "Engine"        = { "$($_.Engine)($($_.EngineVersion))" }
+    "Status"        = "Status"
+    "Endpoint"      = "Endpoint"
+})
+
+$report += Format-ReportTable "RDS Manual Snapshots" $allRdsSnapshots ([ordered]@{
+    "Region"      = "Region"
+    "Snapshot ID" = "DBSnapshotIdentifier"
+    "Instance"    = "DBInstanceIdentifier"
+    "Engine"      = "Engine"
+    "Size (GiB)"  = "AllocatedStorage"
+    "Created"     = "SnapshotCreateTime"
+})
+
+$report += Format-ReportTable "DynamoDB Tables" $allDynamoTables ([ordered]@{
+    "Region"     = "Region"
+    "Table Name" = "Value"
+})
+
+$report += Format-ReportTable "ElastiCache Clusters" $allElastiCache ([ordered]@{
+    "Region"     = "Region"
+    "Cluster ID" = "CacheClusterId"
+    "Engine"     = { "$($_.Engine)($($_.EngineVersion))" }
+    "Node Type"  = "CacheNodeType"
+    "Status"     = "CacheClusterStatus"
+})
+
+$report += Format-ReportTable "Redshift Clusters" $allRedshift ([ordered]@{
+    "Region"     = "Region"
+    "Cluster ID" = "ClusterIdentifier"
+    "Node Type"  = "NodeType"
+    "Nodes"      = "NumberOfNodes"
+    "Status"     = "ClusterStatus"
+})
+
+$report += Format-ReportTable "EFS File Systems" $allEfs ([ordered]@{
+    "Region"         = "Region"
+    "File System ID" = "FileSystemId"
+    "Name"           = "Name"
+    "Size (Bytes)"   = { $_.SizeInBytes.Value }
+    "State"          = "LifeCycleState"
+})
+
+$report += Format-ReportTable "OpenSearch Domains" $allOpenSearch ([ordered]@{
+    "Region"      = "Region"
+    "Domain Name" = "DomainName"
+    "Engine Type" = "EngineType"
+})
+
+# S3 is a global namespace, but each bucket is pinned to one region - resolved above
+# with get-bucket-location so buckets can be matched against the regions scanned.
+$report += Format-ReportTable "S3 Buckets" $s3Buckets ([ordered]@{
+    "Region"      = "Region"
+    "Bucket Name" = "Name"
+    "Created"     = "CreationDate"
+}) "*No S3 Buckets found. Note: buckets are account-wide, so this covers every region.*"
+
 $report += @"
-## 4. Secrets, Systems Manager & Security (Secrets / SSM / IAM)
+## 4. Application & Integration Services
+
+"@
+
+$report += Format-ReportTable "API Gateway REST APIs" $allRestApis ([ordered]@{
+    "Region"  = "Region"
+    "API ID"  = "id"
+    "Name"    = "name"
+    "Created" = "createdDate"
+})
+
+$report += Format-ReportTable "API Gateway HTTP APIs" $allHttpApis ([ordered]@{
+    "Region"   = "Region"
+    "API ID"   = "ApiId"
+    "Name"     = "Name"
+    "Protocol" = "ProtocolType"
+    "Endpoint" = "ApiEndpoint"
+})
+
+$report += Format-ReportTable "SNS Topics" $allSnsTopics ([ordered]@{
+    "Region"    = "Region"
+    "Topic ARN" = "TopicArn"
+})
+
+$report += Format-ReportTable "SQS Queues" $allSqsQueues ([ordered]@{
+    "Region"    = "Region"
+    "Queue URL" = "Value"
+})
+
+$report += Format-ReportTable "EventBridge Rules" $allEventRules ([ordered]@{
+    "Region"   = "Region"
+    "Name"     = "Name"
+    "State"    = "State"
+    "Schedule" = "ScheduleExpression"
+})
+
+$report += Format-ReportTable "Step Functions State Machines" $allStateMachines ([ordered]@{
+    "Region"  = "Region"
+    "Name"    = "name"
+    "Type"    = "type"
+    "Created" = "creationDate"
+})
+
+$report += Format-ReportTable "Kinesis Streams" $allKinesisStreams ([ordered]@{
+    "Region"      = "Region"
+    "Stream Name" = "Value"
+})
+
+$report += Format-ReportTable "Cognito User Pools" $allUserPools ([ordered]@{
+    "Region"  = "Region"
+    "Pool ID" = "Id"
+    "Name"    = "Name"
+})
+
+$report += @"
+## 5. Developer & Deployment Tooling
+
+"@
+
+$report += Format-ReportTable "CloudFormation Stacks" $allStacks ([ordered]@{
+    "Region"     = "Region"
+    "Stack Name" = "StackName"
+    "Status"     = "StackStatus"
+    "Created"    = "CreationTime"
+})
+
+$report += Format-ReportTable "CodeBuild Projects" $allCodeBuild ([ordered]@{
+    "Region"       = "Region"
+    "Project Name" = "Value"
+})
+
+$report += Format-ReportTable "CodeDeploy Applications" $allCodeDeploy ([ordered]@{
+    "Region"           = "Region"
+    "Application Name" = "Value"
+})
+
+$report += Format-ReportTable "CodePipeline Pipelines" $allPipelines ([ordered]@{
+    "Region"  = "Region"
+    "Name"    = "name"
+    "Created" = "created"
+})
+
+$report += Format-ReportTable "Cloud9 Environments" $allCloud9 ([ordered]@{
+    "Region" = "Region"
+    "ID"     = "id"
+    "Name"   = "name"
+    "Type"   = "type"
+})
+
+$report += @"
+## 6. Global Services (CloudFront / Route 53 / IAM)
+
+"@
+
+$report += Format-ReportTable "CloudFront Distributions" $cloudfrontDists ([ordered]@{
+    "Distribution ID" = "Id"
+    "Domain Name"     = "DomainName"
+    "Enabled"         = "Enabled"
+    "Status"          = "Status"
+    "Comment"         = "Comment"
+    "Origins"         = { (@($_.Origins.Items) | ForEach-Object { $_.DomainName }) -join ", " }
+})
+
+$report += Format-ReportTable "Route 53 Hosted Zones" $route53Zones ([ordered]@{
+    "Zone ID"      = "Id"
+    "Name"         = "Name"
+    "Private"      = { $_.Config.PrivateZone }
+    "Record Count" = "ResourceRecordSetCount"
+})
+
+# IAM Roles (Global) - every role in the account, unfiltered
+if ($roles -and $roles.Roles.Count -gt 0) {
+    $report += "### IAM Roles`n"
+    $report += "*All $($roles.Roles.Count) roles in the account (global, not region-scoped).*`n`n"
+    $report += "| Role Name | Create Date | Path | Arn |`n"
+    $report += "| --- | --- | --- | --- |`n"
+    foreach ($role in $roles.Roles) {
+        $report += "| $($role.RoleName) | $($role.CreateDate) | $($role.Path) | $($role.Arn) |`n"
+    }
+    $report += "`n"
+} else {
+    $report += "### IAM Roles`n*No IAM Roles found.*`n`n"
+}
+
+$report += Format-ReportTable "IAM Users" $iamUsers ([ordered]@{
+    "User Name" = "UserName"
+    "Path"      = "Path"
+    "Created"   = "CreateDate"
+    "Arn"       = "Arn"
+})
+
+$report += Format-ReportTable "IAM Groups" $iamGroups ([ordered]@{
+    "Group Name" = "GroupName"
+    "Path"       = "Path"
+    "Created"    = "CreateDate"
+})
+
+$report += Format-ReportTable "IAM Customer-Managed Policies" $iamPolicies ([ordered]@{
+    "Policy Name" = "PolicyName"
+    "Attachments" = "AttachmentCount"
+    "Created"     = "CreateDate"
+    "Arn"         = "Arn"
+})
+
+$report += Format-ReportTable "IAM Instance Profiles" $iamProfiles ([ordered]@{
+    "Profile Name" = "InstanceProfileName"
+    "Roles"        = { (@($_.Roles) | ForEach-Object { $_.RoleName }) -join ", " }
+    "Created"      = "CreateDate"
+})
+
+$report += @"
+## 7. Secrets, Systems Manager & Logging
 
 "@
 
@@ -727,20 +1336,6 @@ if ($allSsmParams.Count -gt 0) {
     $report += "### SSM Parameters`n*No SSM Parameters found.*`n`n"
 }
 
-# IAM Roles (Global) - every role in the account, unfiltered
-if ($roles -and $roles.Roles.Count -gt 0) {
-    $report += "### IAM Roles`n"
-    $report += "*All $($roles.Roles.Count) roles in the account (global, not region-scoped).*`n`n"
-    $report += "| Role Name | Create Date | Path | Arn |`n"
-    $report += "| --- | --- | --- | --- |`n"
-    foreach ($role in $roles.Roles) {
-        $report += "| $($role.RoleName) | $($role.CreateDate) | $($role.Path) | $($role.Arn) |`n"
-    }
-    $report += "`n"
-} else {
-    $report += "### IAM Roles`n*No IAM Roles found.*`n`n"
-}
-
 # CloudWatch Log Groups
 if ($allLogGroups.Count -gt 0) {
     $report += "### CloudWatch Log Groups`n"
@@ -753,9 +1348,56 @@ if ($allLogGroups.Count -gt 0) {
     $report += "`n"
 }
 
+$report += Format-ReportTable "CloudWatch Alarms" $allAlarms ([ordered]@{
+    "Region" = "Region"
+    "Name"   = "AlarmName"
+    "State"  = "StateValue"
+    "Metric" = { "$($_.Namespace)/$($_.MetricName)" }
+    "Actions Enabled" = "ActionsEnabled"
+})
+
+$report += Format-ReportTable "Application Auto Scaling Targets (ECS)" $allScalableTargets ([ordered]@{
+    "Region"      = "Region"
+    "Resource ID" = "ResourceId"
+    "Dimension"   = "ScalableDimension"
+    "Min/Max"     = { "$($_.MinCapacity)/$($_.MaxCapacity)" }
+})
+
+# Catch-all sweep. Anything here that has no home in the sections above is a resource
+# type this script does not describe explicitly - that is the signal to add one.
+$report += @"
+## 8. Tagged Resource Sweep (catch-all)
+
+"@
+
+if ($allTaggedResources.Count -gt 0) {
+    $sweepByService = $allTaggedResources | Group-Object {
+        # ARN shape: arn:aws:<service>:<region>:<account>:<resource>
+        $parts = ([string]$_.ResourceARN).Split(':')
+        if ($parts.Count -gt 2) { $parts[2] } else { "unknown" }
+    } | Sort-Object Name
+
+    $report += "*$($allTaggedResources.Count) taggable resource(s) found across the scanned regions, grouped by service. "
+    $report += "A service listed here with no matching section above is a resource type this report does not yet describe in detail.*`n`n"
+    $report += "| Service | Count |`n"
+    $report += "| --- | --- |`n"
+    foreach ($group in $sweepByService) {
+        $report += "| $($group.Name) | $($group.Count) |`n"
+    }
+    $report += "`n"
+
+    $report += Format-ReportTable "All Tagged Resources" $allTaggedResources ([ordered]@{
+        "Region" = "Region"
+        "ARN"    = "ResourceARN"
+        "Tags"   = { (@($_.Tags) | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "; " }
+    })
+} else {
+    $report += "*No taggable resources returned by the Resource Groups Tagging API.*`n`n"
+}
+
 # Failed AWS calls - so an empty section can be told apart from a denied permission
 $report += @"
-## 5. Failed AWS Calls
+## 9. Failed AWS Calls
 
 "@
 
@@ -772,14 +1414,29 @@ if ($apiErrors.Count -gt 0) {
     $report += "*All AWS CLI calls succeeded.*`n`n"
 }
 
+if ($unavailableEndpoints.Count -gt 0) {
+    $report += "### Services not available in a region`n`n"
+    $report += "*$($unavailableEndpoints.Count) call(s) were skipped because the service has no endpoint in that region. "
+    $report += "These are not failures and leave no gap in the report - the resource type cannot exist there.*`n`n"
+    $report += "| Query | Command |`n"
+    $report += "| --- | --- |`n"
+    foreach ($u in $unavailableEndpoints) {
+        $report += "| $($u.Query) | ``$($u.Command)`` |`n"
+    }
+    $report += "`n"
+}
+
 # Write report to file
 $report | Out-File -FilePath $reportPath -Encoding utf8
 
 Write-Host ""
 if ($apiErrors.Count -gt 0) {
-    Write-Host "$($apiErrors.Count) AWS CLI call(s) failed - see section 5 of the report for details." -ForegroundColor Yellow
+    Write-Host "$($apiErrors.Count) AWS CLI call(s) failed - see section 9 of the report for details." -ForegroundColor Yellow
 } else {
     Write-Host "All AWS CLI calls succeeded." -ForegroundColor Green
+}
+if ($unavailableEndpoints.Count -gt 0) {
+    Write-Host "$($unavailableEndpoints.Count) call(s) skipped - service not offered in that region." -ForegroundColor Gray
 }
 Write-Host "Report successfully generated and saved to: $reportPath" -ForegroundColor Green
 Write-Host "Done!" -ForegroundColor Green

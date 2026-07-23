@@ -1,0 +1,203 @@
+---
+sidebar_position: 9
+---
+
+# Infrastructure cleanup
+
+`scripts/cleanup-infra.ps1` deletes AWS resources, in one of two scopes.
+
+```bash
+npm run cleanup-infra           # dry run  - plans deleting everything except the project
+npm run cleanup-infra:apply     # executes, after typing DELETE
+
+npm run teardown-infra          # dry run  - plans deleting everything, project included
+npm run teardown-infra:apply    # executes, after typing DELETE EVERYTHING
+```
+
+**Cleanup** (the default) leaves `pinky-and-the-brain-agents` as the only thing running
+in the account. **Teardown** (`-IncludeProject`) takes the project with it, for a full
+wipe to zero cost; `npm run create-infra` rebuilds the stack afterwards.
+
+The two share one script, one discovery sweep and one deletion engine. The only
+difference is the keep list: `-IncludeProject` empties it, so project resources fall
+through to the same DELETE branches everything else already takes, inheriting the
+deletion commands and the dependency ordering written for them.
+
+## Safety model
+
+The script is read-only unless `-Apply` is passed. Four things stand between a dry run
+and a deletion:
+
+1. **Dry run is the default.** Without `-Apply` the script only issues
+   List/Describe calls. Every deletion it would perform is printed and written to
+   `infra-reports/<timestamp>-<cleanup|teardown>-dry-run-report.md`, including the
+   exact AWS CLI command sequence, but nothing is executed.
+2. **`-Apply` still prompts.** You must type `DELETE` in capitals - or
+   `DELETE EVERYTHING` under `-IncludeProject`, a phrase deliberately chosen so it
+   cannot be typed by muscle memory from an ordinary cleanup run. Anything else
+   aborts. `-Force` skips the prompt and exists only for unattended runs.
+3. **Allowlist, not denylist.** A resource is deleted only when it fails *every* keep
+   rule. A resource type the script cannot enumerate is never assumed to be junk.
+4. **Denied calls never become deletions.** If a List/Describe returns
+   `AccessDenied`, that resource type is left unclassified and recorded in the
+   report's *Failed AWS Calls* section. An incomplete sweep is reported as
+   incomplete, not as an empty account.
+
+S3 buckets are a special case: they are reported for manual review and **never**
+deleted automatically, even under `-Apply`, because emptying a bucket destroys its
+objects irrecoverably. Under `-IncludeProject` the project's own SSM parameters join
+them - they hold the GitHub token, Anthropic key and app API key, values AWS cannot
+give back once deleted. Standard parameters are free, so keeping them costs nothing
+and losing them costs a manual re-issue of three secrets.
+
+## Keep rules
+
+A resource survives if any of these hold:
+
+| # | Rule | Why |
+| --- | --- | --- |
+| 1 | Name, ID or ARN contains `pinky-and-the-brain-agents`, `ecs-express-gateway-alb` or `ecs-gateway-tg` | The project prefix covers everything Terraform names. The other two are infrastructure the ECS Express Gateway service creates on the project's behalf under generated names that carry no prefix - the ALB fronting the service and its target groups. Deleting those breaks the running service. |
+| 2 | It is a default VPC, or a subnet / route table / IGW / default security group inside one | Default VPCs are free, and the us-east-1 default VPC (`vpc-c8de99b2`) is where the ECS service actually runs. |
+| 3 | It is an AWS service-linked role (path under `/aws-service-role/`) | Owned by AWS, free, recreated on demand, and several cannot be deleted while their service is in use. |
+| 4 | It is attached to something already kept | Chiefly the six Elastic IPs bound to the project ALB's network interfaces. Releasing those would strip the public addresses off a live service - and because they carry no project tag, name matching alone would have deleted them. |
+| 5 | It is the caller's own IAM role, or a policy attached to the caller | Deleting those revokes the credentials mid-run and strands the account. The script resolves the caller's identity, groups and attached policies before the IAM sweep and excludes them. |
+| 6 | It is the CloudFront distribution in `terraform/terraform.tfstate` (`EURDC8IXBZDD5`) | CloudFront IDs carry no name, so the project's CDN is pinned explicitly. |
+
+The keep list is derived from `terraform/terraform.tfstate`, which is the authoritative
+record of what the project owns: one ECR repository, three IAM roles, one IAM policy,
+one ECS cluster, one ECS Express Gateway service and one CloudFront distribution.
+
+### What `-IncludeProject` changes
+
+Only rules 1 and 6 - the two that identify the project. **Rules 2 to 5 hold in both
+modes**, which is what keeps a teardown survivable: default VPCs are free and not
+usefully deletable, service-linked roles are AWS's to manage, and the caller's own
+credentials have to outlive the run that uses them.
+
+Deletion *reasons* are rewritten to match the mode too. A report explaining that the
+project's ECR repository is being deleted because it "is not part of the project" is
+worse than no explanation, so under `-IncludeProject` those read
+`Project resource - deleted because -IncludeProject was passed`.
+
+After a teardown that actually executed, `terraform/terraform.tfstate` is moved to
+`terraform.tfstate.pre-teardown-<timestamp>`. Terraform can recover from a stale state
+on its own, but only if *every* resource in it is genuinely gone; a partial teardown
+leaves a state that disagrees with reality in both directions, which is how a later
+apply ends up trying to update something it should be creating.
+
+## Deletion order
+
+Deletions run low-order-first so dependencies never block their parents - AWS refuses
+to delete a security group still attached to an instance, or a VPC that still has
+subnets.
+
+| Order | Stage |
+| --- | --- |
+| 5-15 | Cloud9 environments, ECS services, ECS clusters |
+| 20-30 | Load balancers, target groups, Auto Scaling groups (before instances, or the group just replaces what was terminated) |
+| 35-55 | EC2 instances, NAT gateways, Elastic IPs, Lambda functions |
+| 65-85 | Security groups, subnets, route tables, internet gateways, VPCs |
+| 90-140 | ECR, SSM parameters, log groups, EBS volumes and snapshots, AMIs, key pairs, CodeBuild, CodeDeploy, CloudFormation |
+| 210-230 | IAM roles and policies, CloudFront distributions |
+| 900+ | Manual review only - never executed automatically (S3 buckets, and under `-IncludeProject` the project's SSM secrets) |
+
+Two stages cannot be expressed as a single command and are emitted as sequences:
+
+- **IAM roles** need every managed policy detached, every inline policy deleted and
+  every instance profile disassociated before `delete-role` succeeds. If listing those
+  attachments is denied, the plan says so explicitly rather than presenting a bare
+  `delete-role` that would fail with `DeleteConflict`.
+- **CloudFront distributions** must be disabled, allowed to propagate, and only then
+  deleted - and the `ETag` changes between the two calls, so the plan documents the
+  steps instead of pretending they are automatable in one pass.
+
+## Reports
+
+Every run writes `infra-reports/<timestamp>-<scope>-<mode>-report.md` - where scope is
+`cleanup` or `teardown` and mode is `dry-run` or `apply` - containing:
+
+1. **Resources planned for deletion** - in execution order, each with the reason it
+   was classified as junk, any caveats, and its status.
+2. **Deletion commands** - the exact AWS CLI sequence, runnable by hand.
+3. **Resources kept** - every survivor and the rule that saved it. This half matters
+   as much as the deletion list: it is how you check the script did not decide
+   something load-bearing was disposable.
+4. **Classification rules** and the deletion-order table, so the report explains
+   itself without the script.
+5. **Failed AWS Calls** - every denied or failed call with its error text.
+
+`infra-reports/` is gitignored; the reports are local artifacts.
+
+## Required permissions
+
+One file covers all three scripts: `terraform/aws-permissions.json`. It grants the
+read-only inventory (`report-infra` and every dry run), the provisioning
+(`create-infra`) and the deletions (`cleanup-infra`, `teardown-infra`).
+
+```bash
+aws iam create-policy \
+  --policy-name pinky-and-the-brain-infra \
+  --policy-document file://terraform/aws-permissions.json
+
+aws iam attach-user-policy \
+  --user-name penny-processor \
+  --policy-arn arn:aws:iam::<account-id>:policy/pinky-and-the-brain-infra
+```
+
+It is a valid IAM policy document with no extra top-level keys, so it can be passed
+straight to `aws iam create-policy`. Do not add a `_comment` key - IAM rejects the
+document with `MalformedPolicyDocument`.
+
+### Why one file, and how it fits
+
+IAM caps a customer-managed policy at 6,144 characters. The earlier per-script
+policies came to 8,468 combined, which is why they used to be attached separately -
+with a nasty failure mode when one replaced another, leaving an identity able to
+*delete* but unable to *list*.
+
+Collapsing the `Resource: "*"` statements and switching to action wildcards
+(`ec2:Describe*`, `ecs:List*`, `cloudfront:*`) brings the merged document to roughly
+3,700 characters. One policy, one attachment, nothing to keep in sync. Verify what is
+attached after any change:
+
+```bash
+aws iam list-attached-user-policies --user-name penny-processor
+```
+
+### Why the grants are broad
+
+The delete actions are granted on `*`. They cannot be scoped by name, because a
+cleanup targets resources that by definition are *not* named after the project - and a
+teardown targets the project as well.
+
+Two `Deny` statements draw the lines that do hold, and an explicit `Deny` always beats
+an `Allow`:
+
+- **`ProtectCallerCredentials`** - the caller's own IAM user (`${aws:username}`) and
+  the `pinky-and-the-brain-infra` policy itself cannot be modified or deleted. This is
+  the IAM-level mirror of keep rule 5: without it, a teardown can revoke its own
+  access halfway through.
+- **`ProtectServiceLinkedRoles`** - nothing under `/aws-service-role/` can be deleted.
+
+There is deliberately **no** `Deny` protecting `pinky-and-the-brain-agents-*` ARNs.
+The previous cleanup policy had one, and it would now block `teardown-infra` outright.
+Deleting the project is a supported operation, so its guard rails live in the script -
+dry run by default, allowlist classification, and a typed `DELETE EVERYTHING` - not in
+IAM.
+
+That leaves one limit worth knowing: EC2-family resources (security groups, subnets,
+VPCs, Elastic IPs, network interfaces) have ID-based ARNs, not name-based ones, so no
+name pattern could protect them even if one were wanted. For those the allowlist
+classification in the script is the only safeguard - which is why the keep list in
+every dry-run report deserves a read before applying.
+
+### Verifying a permission without using it
+
+EC2 delete calls accept `--dry-run`, which reports whether the caller is authorised
+without touching anything. Useful for confirming a grant landed:
+
+```bash
+aws ec2 terminate-instances --instance-ids i-xxxx --region sa-east-1 --dry-run
+# DryRunOperation      -> permitted
+# UnauthorizedOperation -> denied
+```
